@@ -2317,7 +2317,7 @@ namespace EOSNative
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("Setup Wizard"))
             {
-                EditorApplication.ExecuteMenuItem("Tools/EOS/Setup Wizard");
+                EditorApplication.ExecuteMenuItem("Tools/EOS SDK/Setup Wizard");
             }
             if (config != null && GUILayout.Button("Select Config"))
             {
