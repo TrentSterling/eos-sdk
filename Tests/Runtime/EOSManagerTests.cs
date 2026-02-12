@@ -1,7 +1,6 @@
-using System.Collections;
+using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
-using UnityEngine.TestTools;
 using EOSNative;
 
 namespace EOSNative.Tests.Runtime
@@ -10,14 +9,17 @@ namespace EOSNative.Tests.Runtime
     {
         private GameObject _go;
 
+        private static readonly FieldInfo s_InstanceField =
+            typeof(EOSManager).GetField("s_Instance", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
+
         [TearDown]
         public void TearDown()
         {
             if (_go != null)
                 Object.DestroyImmediate(_go);
 
-            // Clear singleton
-            EOSManager.s_Instance = null;
+            // Clear singleton via reflection
+            s_InstanceField?.SetValue(null, null);
         }
 
         [Test]
@@ -44,8 +46,8 @@ namespace EOSNative.Tests.Runtime
         {
             _go = new GameObject("TestEOSManager");
             var mgr1 = _go.AddComponent<EOSManager>();
-            // Force singleton assignment
-            EOSManager.s_Instance = mgr1;
+            // Force singleton assignment via reflection
+            s_InstanceField?.SetValue(null, mgr1);
 
             var go2 = new GameObject("DuplicateEOSManager");
             var mgr2 = go2.AddComponent<EOSManager>();
