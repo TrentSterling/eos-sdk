@@ -35,7 +35,7 @@ namespace EOSNative.Editor
 
         private static readonly string[] TabNames = { "Setup", "Dependencies", "About" };
 
-        [MenuItem("Tools/EOS Native/Setup Wizard", priority = -100)]
+        [MenuItem("Tools/EOS/Setup Wizard", priority = -100)]
         public static void ShowWindow()
         {
             var window = GetWindow<EOSSetupWizard>("EOS Setup Wizard");
