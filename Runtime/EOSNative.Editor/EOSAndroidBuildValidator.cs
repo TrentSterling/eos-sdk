@@ -847,27 +847,34 @@ namespace EOSNative.Editor
         {
             string androidDir = Path.Combine(Application.dataPath, "Plugins", "Android");
 
-            // Check for existing templates
-            if (!silent && Directory.Exists(androidDir))
-            {
-                string[] existing = Directory.GetFiles(androidDir, "*.gradle")
-                    .Concat(Directory.GetFiles(androidDir, "*.properties"))
-                    .ToArray();
-                if (existing.Length > 0)
-                {
-                    string fileList = string.Join("\n", existing.Select(Path.GetFileName));
-                    if (!EditorUtility.DisplayDialog("Overwrite Gradle Templates?",
-                        $"The following template files already exist:\n\n{fileList}\n\n" +
-                        "Overwriting will replace them with EOS-configured versions. Continue?",
-                        "Overwrite", "Cancel"))
-                    {
-                        return;
-                    }
-                }
-            }
-
             if (!Directory.Exists(androidDir))
                 Directory.CreateDirectory(androidDir);
+
+            // Delete ALL old gradle template files first to ensure clean state
+            string[] templateFileNames = new[]
+            {
+                "mainTemplate.gradle",
+                "launcherTemplate.gradle",
+                "gradleTemplate.properties",
+                "settingsTemplate.gradle",
+                "baseProjectTemplate.gradle" // legacy Unity template, clean it up too
+            };
+            int deleted = 0;
+            foreach (var fileName in templateFileNames)
+            {
+                string filePath = Path.Combine(androidDir, fileName);
+                if (File.Exists(filePath))
+                {
+                    File.Delete(filePath);
+                    // Also delete .meta file
+                    string metaPath = filePath + ".meta";
+                    if (File.Exists(metaPath))
+                        File.Delete(metaPath);
+                    deleted++;
+                }
+            }
+            if (deleted > 0)
+                Debug.Log($"[EOS Android Validator] Deleted {deleted} old gradle template(s)");
 
             GenerateMainTemplate(androidDir);
             GenerateLauncherTemplate(androidDir);
