@@ -86,6 +86,12 @@ namespace EOSNative.Lobbies
         /// </summary>
         public event Action<string, string, string> OnMemberAttributeUpdated; // PUID, key, value
 
+        /// <summary>
+        /// Async hook invoked BEFORE leaving a lobby. Transport registers this
+        /// to stop FishNet before the EOS leave is sent.
+        /// </summary>
+        public Func<Task> BeforeLeaveLobby { get; set; }
+
         #endregion
 
         #region Properties
@@ -998,6 +1004,13 @@ namespace EOSNative.Lobbies
                 return Result.NotFound;
             }
 
+            // Invoke pre-leave hook (e.g. transport stops FishNet before EOS leave)
+            if (BeforeLeaveLobby != null)
+            {
+                try { await BeforeLeaveLobby(); }
+                catch (Exception ex) { Debug.LogWarning($"[EOSLobbyManager] BeforeLeaveLobby hook failed: {ex.Message}"); }
+            }
+
             string lobbyId = CurrentLobby.LobbyId;
 
             var leaveOptions = new LeaveLobbyOptions
@@ -1390,23 +1403,35 @@ namespace EOSNative.Lobbies
             };
 
             // Retry with backoff — EOS SDK local cache may not be populated immediately after join
-            LobbyDetails details = null;
-            Result result = Result.NotFound;
-            for (int i = 0; i < 5; i++)
+            // We need both: the details handle AND the owner info to be available
+            LobbyData lobbyData = default;
+            for (int i = 0; i < 15; i++)
             {
-                await Task.Delay(100 * (i + 1));
-                result = LobbyInterface.CopyLobbyDetailsHandle(ref options, out details);
-                if (result == Result.Success && details != null) break;
+                await Task.Delay(100 * Math.Min(i + 1, 5)); // 100, 200, 300, 400, 500, 500, ...
+
+                var result = LobbyInterface.CopyLobbyDetailsHandle(ref options, out LobbyDetails details);
+                if (result != Result.Success || details == null)
+                    continue;
+
+                lobbyData = ExtractLobbyData(details);
+                details.Release();
+
+                // Owner info is critical for client auto-connect — keep retrying if missing
+                if (!string.IsNullOrEmpty(lobbyData.OwnerPuid))
+                    break;
+
+                EOSDebugLogger.Log(DebugCategory.LobbyManager, "EOSLobbyManager",
+                    $"GetLobbyDataAsync: Details available but OwnerPuid not yet populated (attempt {i + 1})");
             }
 
-            if (result != Result.Success || details == null)
+            if (string.IsNullOrEmpty(lobbyData.LobbyId))
             {
-                Debug.LogWarning($"[EOSLobbyManager] Failed to get lobby details after retries: {result}");
-                return default;
+                Debug.LogWarning($"[EOSLobbyManager] Failed to get lobby details after retries");
             }
-
-            var lobbyData = ExtractLobbyData(details);
-            details.Release();
+            else if (string.IsNullOrEmpty(lobbyData.OwnerPuid))
+            {
+                Debug.LogWarning($"[EOSLobbyManager] Got lobby details but OwnerPuid never populated");
+            }
 
             return lobbyData;
         }
