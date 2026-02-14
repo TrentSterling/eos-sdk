@@ -1205,6 +1205,112 @@ dependencyResolutionManagement {
         }
 
         #endregion
+
+        #region Headless API (MCP-friendly)
+
+        /// <summary>
+        /// Run all validation checks headlessly and return JSON results.
+        /// Called via reflection from TrontMCP validate_android_build tool.
+        /// </summary>
+        public static string RunValidationJson()
+        {
+            var window = CreateInstance<EOSAndroidBuildValidator>();
+            window._pluginsAndroidPath = Path.Combine(Application.dataPath, "Plugins", "Android");
+            window._projectSettingsPath = Path.Combine(Application.dataPath, "..", "ProjectSettings");
+            window.RunValidation();
+            string json = SerializeChecks(window._checks);
+            DestroyImmediate(window);
+            return json;
+        }
+
+        /// <summary>
+        /// Auto-fix all fixable issues, re-validate, and return JSON results.
+        /// Called via reflection from TrontMCP validate_android_build tool.
+        /// </summary>
+        public static string AutoFixAllJson()
+        {
+            var window = CreateInstance<EOSAndroidBuildValidator>();
+            window._pluginsAndroidPath = Path.Combine(Application.dataPath, "Plugins", "Android");
+            window._projectSettingsPath = Path.Combine(Application.dataPath, "..", "ProjectSettings");
+            window.RunValidation();
+
+            // Collect what we fixed
+            var fixed_ = new List<string>();
+            foreach (var check in window._checks)
+            {
+                if (check.AutoFix != null && (check.Status == CheckStatus.Fail || check.Status == CheckStatus.Warning))
+                {
+                    check.AutoFix();
+                    fixed_.Add(check.Name);
+                }
+            }
+
+            // Re-validate after fixes
+            window.RunValidation();
+            string json = SerializeChecks(window._checks, fixed_);
+            DestroyImmediate(window);
+            return json;
+        }
+
+        /// <summary>
+        /// Generate all gradle templates headlessly and return JSON result.
+        /// Called via reflection from TrontMCP validate_android_build tool.
+        /// </summary>
+        public static string GenerateGradleTemplatesJson()
+        {
+            GenerateAllGradleTemplates(silent: true);
+            return "{\"success\":true,\"message\":\"Generated 4 gradle templates in Assets/Plugins/Android/\"}";
+        }
+
+        private static string SerializeChecks(List<Check> checks, List<string> fixed_ = null)
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.Append("{\"checks\":[");
+            for (int i = 0; i < checks.Count; i++)
+            {
+                var c = checks[i];
+                if (i > 0) sb.Append(",");
+                sb.Append("{\"name\":\"").Append(EscapeJson(c.Name)).Append("\",");
+                sb.Append("\"status\":\"").Append(c.Status.ToString().ToLower()).Append("\",");
+                sb.Append("\"detail\":\"").Append(EscapeJson(c.Detail)).Append("\"");
+                if (c.Fix != null)
+                    sb.Append(",\"fix\":\"").Append(EscapeJson(c.Fix)).Append("\"");
+                sb.Append(",\"canAutoFix\":").Append(c.AutoFix != null ? "true" : "false");
+                sb.Append("}");
+            }
+            sb.Append("],");
+
+            int pass = checks.Count(c => c.Status == CheckStatus.Pass);
+            int warn = checks.Count(c => c.Status == CheckStatus.Warning);
+            int fail = checks.Count(c => c.Status == CheckStatus.Fail);
+            sb.Append("\"summary\":{");
+            sb.Append("\"pass\":").Append(pass).Append(",");
+            sb.Append("\"warn\":").Append(warn).Append(",");
+            sb.Append("\"fail\":").Append(fail).Append(",");
+            sb.Append("\"total\":").Append(checks.Count).Append("}");
+
+            if (fixed_ != null && fixed_.Count > 0)
+            {
+                sb.Append(",\"fixed\":[");
+                for (int i = 0; i < fixed_.Count; i++)
+                {
+                    if (i > 0) sb.Append(",");
+                    sb.Append("\"").Append(EscapeJson(fixed_[i])).Append("\"");
+                }
+                sb.Append("]");
+            }
+
+            sb.Append("}");
+            return sb.ToString();
+        }
+
+        private static string EscapeJson(string s)
+        {
+            if (s == null) return "";
+            return s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t");
+        }
+
+        #endregion
     }
 }
 #endif
