@@ -247,6 +247,7 @@ namespace EOSNative.Voice
         private int _frameIndex;
         private bool _catchingUp;
         private bool _hasStartedPlaying;
+        private bool _subscribedToVoiceManager;
         private SMBPitchShifter _pitchShifter;
 
         #endregion
@@ -320,18 +321,16 @@ namespace EOSNative.Voice
 
         private void OnEnable()
         {
-            if (EOSVoiceManager.Instance != null)
-            {
-                EOSVoiceManager.Instance.OnAudioFrameReceived += OnAudioFrameReceived;
-            }
+            TrySubscribeToVoiceManager();
         }
 
         private void OnDisable()
         {
-            if (EOSVoiceManager.Instance != null)
+            if (_subscribedToVoiceManager && EOSVoiceManager.Instance != null)
             {
                 EOSVoiceManager.Instance.OnAudioFrameReceived -= OnAudioFrameReceived;
             }
+            _subscribedToVoiceManager = false;
 
             // Stop playback
             if (_audioSource != null && _audioSource.isPlaying)
@@ -341,8 +340,20 @@ namespace EOSNative.Voice
             _hasStartedPlaying = false;
         }
 
+        private void TrySubscribeToVoiceManager()
+        {
+            if (_subscribedToVoiceManager) return;
+            if (EOSVoiceManager.Instance == null) return;
+
+            EOSVoiceManager.Instance.OnAudioFrameReceived += OnAudioFrameReceived;
+            _subscribedToVoiceManager = true;
+        }
+
         private void Update()
         {
+            // Lazy subscribe if VoiceManager wasn't ready at OnEnable
+            TrySubscribeToVoiceManager();
+
             // Auto-play when frames arrive
             if (_autoPlay && _audioQueue.Count > 0 && !_audioSource.isPlaying && !string.IsNullOrEmpty(_participantPuid))
             {
