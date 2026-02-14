@@ -878,10 +878,72 @@ namespace EOSNative.Editor
             Debug.Log("[EOS Android Validator] Generated 4 gradle templates in Assets/Plugins/Android/");
         }
 
+        private static bool IsUnity6_1OrNewer()
+        {
+#if UNITY_6000_1_OR_NEWER
+            return true;
+#else
+            return false;
+#endif
+        }
+
         private static void GenerateMainTemplate(string androidDir)
         {
             string path = Path.Combine(androidDir, "mainTemplate.gradle");
-            File.WriteAllText(path, @"apply plugin: 'com.android.library'
+            if (IsUnity6_1OrNewer())
+            {
+                File.WriteAllText(path, @"apply plugin: 'com.android.library'
+**APPLY_PLUGINS**
+
+dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
+**DEPS**
+}
+
+android {
+    ndkPath ""**NDKPATH**""
+    ndkVersion ""**NDKVERSION**""
+
+    compileSdk **APIVERSION**
+    buildToolsVersion = ""**BUILDTOOLS**""
+
+    compileOptions {
+        coreLibraryDesugaringEnabled true
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    defaultConfig {
+        minSdk **MINSDK**
+        targetSdk **TARGETSDK**
+        ndk {
+            abiFilters **ABIFILTERS**
+            debugSymbolLevel **DEBUGSYMBOLLEVEL**
+        }
+        versionCode **VERSIONCODE**
+        versionName '**VERSIONNAME**'
+        consumerProguardFiles 'proguard-unity.txt'**USER_PROGUARD**
+**DEFAULT_CONFIG_SETUP**
+    }
+
+    lint {
+        abortOnError false
+    }
+
+    androidResources {
+        noCompress = **BUILTIN_NOCOMPRESS** + unityStreamingAssets.tokenize(', ')
+        ignoreAssetsPattern = ""!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~""
+    }**PACKAGING**
+}
+**IL_CPP_BUILD_SETUP**
+**SOURCE_BUILD_SETUP**
+**EXTERNAL_SOURCES**
+");
+            }
+            else
+            {
+                File.WriteAllText(path, @"apply plugin: 'com.android.library'
 **APPLY_PLUGINS**
 
 dependencies {
@@ -897,9 +959,9 @@ android {
     buildToolsVersion '**BUILDTOOLS**'
 
     compileOptions {
+        coreLibraryDesugaringEnabled true
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
-        coreLibraryDesugaringEnabled true
     }
 
     defaultConfig {
@@ -929,13 +991,85 @@ android {
 **SOURCE_BUILD_SETUP**
 **EXTERNAL_SOURCES**
 ");
+            }
             Debug.Log("[EOS Android Validator] Generated mainTemplate.gradle");
         }
 
         private static void GenerateLauncherTemplate(string androidDir)
         {
             string path = Path.Combine(androidDir, "launcherTemplate.gradle");
-            File.WriteAllText(path, @"apply plugin: 'com.android.application'
+            if (IsUnity6_1OrNewer())
+            {
+                File.WriteAllText(path, @"apply plugin: 'com.android.application'
+**APPLY_PLUGINS**
+
+dependencies {
+    implementation project(':unityLibrary')
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
+    implementation 'androidx.appcompat:appcompat:1.5.1'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+    implementation 'androidx.security:security-crypto:1.0.0'
+    implementation 'androidx.browser:browser:1.4.0'
+}
+
+android {
+    ndkPath ""**NDKPATH**""
+    ndkVersion ""**NDKVERSION**""
+
+    compileSdk **APIVERSION**
+    buildToolsVersion = ""**BUILDTOOLS**""
+
+    compileOptions {
+        coreLibraryDesugaringEnabled true
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    defaultConfig {
+        applicationId '**APPLICATIONID**'
+        versionName '**VERSIONNAME**'
+        minSdk **MINSDK**
+        targetSdk **TARGETSDK**
+        versionCode **VERSIONCODE**
+        ndk {
+            abiFilters **ABIFILTERS**
+            debugSymbolLevel **DEBUGSYMBOLLEVEL**
+        }
+    }
+
+    lint {
+        abortOnError false
+    }
+
+    androidResources {
+        noCompress = **BUILTIN_NOCOMPRESS** + unityStreamingAssets.tokenize(', ')
+        ignoreAssetsPattern = ""!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~""
+    }
+
+    buildTypes {
+        debug {
+            minifyEnabled **MINIFY_DEBUG**
+            proguardFiles getDefaultProguardFile('proguard-android.txt')**SIGNCONFIG**
+        }
+        release {
+            minifyEnabled **MINIFY_RELEASE**
+            proguardFiles getDefaultProguardFile('proguard-android.txt')**SIGNCONFIG**
+        }
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging true
+        }
+    }**PACKAGING**
+**SPLITS**
+**LAUNCHER_SOURCE_BUILD_SETUP**
+}
+");
+            }
+            else
+            {
+                File.WriteAllText(path, @"apply plugin: 'com.android.application'
 **APPLY_PLUGINS**
 
 dependencies {
@@ -954,9 +1088,9 @@ android {
     buildToolsVersion '**BUILDTOOLS**'
 
     compileOptions {
+        coreLibraryDesugaringEnabled true
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
-        coreLibraryDesugaringEnabled true
     }
 
     defaultConfig {
@@ -1000,6 +1134,7 @@ android {
 **REPOSITORIES**
 }
 ");
+            }
             Debug.Log("[EOS Android Validator] Generated launcherTemplate.gradle");
         }
 
@@ -1021,7 +1156,8 @@ unityStreamingAssets=**STREAMING_ASSETS**
             string path = Path.Combine(androidDir, "settingsTemplate.gradle");
             File.WriteAllText(path, @"pluginManagement {
     repositories {
-        **PLUGIN_REPOSITORIES**
+        **ARTIFACTORYREPOSITORY**
+        gradlePluginPortal()
         google()
         mavenCentral()
     }
