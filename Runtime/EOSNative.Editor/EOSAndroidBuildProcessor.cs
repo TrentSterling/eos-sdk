@@ -100,11 +100,34 @@ namespace EOSNative.Editor
             // Add coreLibraryDesugaringEnabled to compileOptions block
             if (!content.Contains("coreLibraryDesugaringEnabled"))
             {
-                content = Regex.Replace(
-                    content,
-                    @"(compileOptions\s*\{)",
-                    $"$1\n        {DesugarOption}");
-                modified = true;
+                if (Regex.IsMatch(content, @"compileOptions\s*\{"))
+                {
+                    content = Regex.Replace(
+                        content,
+                        @"(compileOptions\s*\{)",
+                        $"$1\n        {DesugarOption}");
+                    modified = true;
+                }
+                else if (Regex.IsMatch(content, @"android\s*\{"))
+                {
+                    // Fallback: compileOptions block doesn't exist — create it inside android {}
+                    Debug.LogWarning($"[EOS-Native] {moduleName}/build.gradle has no compileOptions block — creating one. " +
+                                     "Consider using custom gradle templates (Tools > EOS SDK > Android Build Validator) for more reliable builds.");
+                    content = Regex.Replace(
+                        content,
+                        @"(android\s*\{)",
+                        "$1\n    compileOptions {\n" +
+                        $"        {DesugarOption}\n" +
+                        "        sourceCompatibility JavaVersion.VERSION_17\n" +
+                        "        targetCompatibility JavaVersion.VERSION_17\n" +
+                        "    }");
+                    modified = true;
+                }
+                else
+                {
+                    Debug.LogError($"[EOS-Native] {moduleName}/build.gradle has no android {{}} or compileOptions {{}} block! " +
+                                   "Cannot inject desugaring. Use custom gradle templates instead (Tools > EOS SDK > Android Build Validator).");
+                }
             }
 
             // Add desugaring dependency to dependencies block
@@ -119,6 +142,8 @@ namespace EOSNative.Editor
                 }
                 else
                 {
+                    Debug.LogWarning($"[EOS-Native] {moduleName}/build.gradle has no dependencies block — appending one. " +
+                                     "Consider using custom gradle templates for more reliable builds.");
                     content += $"\ndependencies {{\n    {DesugarDep}\n}}\n";
                 }
                 modified = true;
@@ -163,6 +188,20 @@ namespace EOSNative.Editor
             {
                 File.WriteAllText(gradlePath, content);
                 Debug.Log($"[EOS-Native] Configured {moduleName}/build.gradle (desugaring + AndroidX dependencies)");
+            }
+
+            // Post-injection verification: re-read and confirm critical entries are present
+            string verification = File.ReadAllText(gradlePath);
+            if (!verification.Contains("coreLibraryDesugaringEnabled true"))
+            {
+                Debug.LogError($"[EOS-Native] VERIFICATION FAILED: {moduleName}/build.gradle is missing 'coreLibraryDesugaringEnabled true' after injection! " +
+                               "This will cause FakeDependency.jar transform errors. " +
+                               "Fix: Use custom gradle templates (Tools > EOS SDK > Android Build Validator > Generate EOS Gradle Templates).");
+            }
+            if (!verification.Contains("desugar_jdk_libs"))
+            {
+                Debug.LogError($"[EOS-Native] VERIFICATION FAILED: {moduleName}/build.gradle is missing desugar_jdk_libs dependency after injection! " +
+                               "Fix: Use custom gradle templates (Tools > EOS SDK > Android Build Validator > Generate EOS Gradle Templates).");
             }
         }
 

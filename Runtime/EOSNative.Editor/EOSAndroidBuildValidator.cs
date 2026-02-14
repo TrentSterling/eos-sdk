@@ -152,6 +152,25 @@ namespace EOSNative.Editor
             }
             EditorGUILayout.EndHorizontal();
 
+            EditorGUILayout.Space(6);
+
+            // Generate Gradle Templates button
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField("FakeDependency.jar / Desugaring Fix", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(
+                "If your Android build fails with 'FakeDependency.jar' transform errors, " +
+                "generating custom gradle templates is the most reliable fix. Templates pre-configure " +
+                "desugaring, AndroidX deps, and Java 17 so the build processor doesn't have to inject them.",
+                _instructionStyle);
+            GUI.backgroundColor = new Color(1f, 0.6f, 0.1f); // Orange
+            if (GUILayout.Button("Generate EOS Gradle Templates", GUILayout.Height(28)))
+            {
+                GenerateAllGradleTemplates(silent: false);
+                RunValidation();
+            }
+            GUI.backgroundColor = oldBg;
+            EditorGUILayout.EndVertical();
+
             EditorGUILayout.Space(8);
 
             if (!_hasRun)
@@ -549,8 +568,12 @@ namespace EOSNative.Editor
                 _checks.Add(new Check
                 {
                     Name = "Gradle Templates",
-                    Status = CheckStatus.Pass,
-                    Detail = "No custom gradle templates — EOSAndroidBuildProcessor has full control. This is ideal."
+                    Status = CheckStatus.Warning,
+                    Detail = "No custom gradle templates found. The build processor injects desugaring at build time, " +
+                             "but this can fail on Unity 6.1+ if the generated gradle has no compileOptions block. " +
+                             "Custom templates are more reliable — click Fix or use the 'Generate EOS Gradle Templates' button.",
+                    Fix = "Generate custom gradle templates with EOS desugaring pre-configured.",
+                    AutoFix = () => GenerateAllGradleTemplates(silent: true)
                 });
             }
             else if (issues.Count == 0)
@@ -810,6 +833,216 @@ namespace EOSNative.Editor
                 Detail = "Unity adds android.permission.INTERNET automatically. " +
                          "RECORD_AUDIO and ACCESS_WIFI_STATE are injected by the build processor."
             });
+        }
+
+        #endregion
+
+        #region Gradle Template Generator
+
+        /// <summary>
+        /// Generate all 4 gradle template files with EOS desugaring pre-configured.
+        /// Templates use Unity's **VARIABLE** placeholders for portability.
+        /// </summary>
+        public static void GenerateAllGradleTemplates(bool silent = false)
+        {
+            string androidDir = Path.Combine(Application.dataPath, "Plugins", "Android");
+
+            // Check for existing templates
+            if (!silent && Directory.Exists(androidDir))
+            {
+                string[] existing = Directory.GetFiles(androidDir, "*.gradle")
+                    .Concat(Directory.GetFiles(androidDir, "*.properties"))
+                    .ToArray();
+                if (existing.Length > 0)
+                {
+                    string fileList = string.Join("\n", existing.Select(Path.GetFileName));
+                    if (!EditorUtility.DisplayDialog("Overwrite Gradle Templates?",
+                        $"The following template files already exist:\n\n{fileList}\n\n" +
+                        "Overwriting will replace them with EOS-configured versions. Continue?",
+                        "Overwrite", "Cancel"))
+                    {
+                        return;
+                    }
+                }
+            }
+
+            if (!Directory.Exists(androidDir))
+                Directory.CreateDirectory(androidDir);
+
+            GenerateMainTemplate(androidDir);
+            GenerateLauncherTemplate(androidDir);
+            GenerateGradleProperties(androidDir);
+            GenerateSettingsTemplate(androidDir);
+
+            AssetDatabase.Refresh();
+            Debug.Log("[EOS Android Validator] Generated 4 gradle templates in Assets/Plugins/Android/");
+        }
+
+        private static void GenerateMainTemplate(string androidDir)
+        {
+            string path = Path.Combine(androidDir, "mainTemplate.gradle");
+            File.WriteAllText(path, @"apply plugin: 'com.android.library'
+**APPLY_PLUGINS**
+
+dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
+**DEPS**
+}
+
+android {
+    ndkPath ""**NDKPATH**""
+
+    compileSdkVersion **APIVERSION**
+    buildToolsVersion '**BUILDTOOLS**'
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+        coreLibraryDesugaringEnabled true
+    }
+
+    defaultConfig {
+        minSdkVersion **MINSDKVERSION**
+        targetSdkVersion **TARGETSDKVERSION**
+        ndk {
+            abiFilters **ABIFILTERS**
+        }
+        versionCode **VERSIONCODE**
+        versionName '**VERSIONNAME**'
+        consumerProguardFiles 'proguard-unity.txt'**USER_PROGUARD**
+    }
+
+    lintOptions {
+        abortOnError false
+    }
+
+    aaptOptions {
+        noCompress = **BUILTIN_NOCOMPRESS** + unityStreamingAssets.tokenize(', ')
+        ignoreAssetsPattern = ""!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~""
+    }**PACKAGING_OPTIONS**
+**SPLITS**
+**LIBRARY_TARGETS**
+**REPOSITORIES**
+}
+**IL_CPP_BUILD_SETUP**
+**SOURCE_BUILD_SETUP**
+**EXTERNAL_SOURCES**
+");
+            Debug.Log("[EOS Android Validator] Generated mainTemplate.gradle");
+        }
+
+        private static void GenerateLauncherTemplate(string androidDir)
+        {
+            string path = Path.Combine(androidDir, "launcherTemplate.gradle");
+            File.WriteAllText(path, @"apply plugin: 'com.android.application'
+**APPLY_PLUGINS**
+
+dependencies {
+    implementation project(':unityLibrary')
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
+    implementation 'androidx.appcompat:appcompat:1.5.1'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+    implementation 'androidx.security:security-crypto:1.0.0'
+    implementation 'androidx.browser:browser:1.4.0'
+}
+
+android {
+    ndkPath ""**NDKPATH**""
+
+    compileSdkVersion **APIVERSION**
+    buildToolsVersion '**BUILDTOOLS**'
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+        coreLibraryDesugaringEnabled true
+    }
+
+    defaultConfig {
+        minSdkVersion **MINSDKVERSION**
+        targetSdkVersion **TARGETSDKVERSION**
+        applicationId '**APPLICATIONID**'
+        ndk {
+            abiFilters **ABIFILTERS**
+        }
+        versionCode **VERSIONCODE**
+        versionName '**VERSIONNAME**'
+    }
+
+    aaptOptions {
+        noCompress = **BUILTIN_NOCOMPRESS** + unityStreamingAssets.tokenize(', ')
+        ignoreAssetsPattern = ""!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~""
+    }
+
+    lintOptions {
+        abortOnError false
+    }
+
+    buildTypes {
+        debug {
+            minifyEnabled **MINIFY_DEBUG**
+            proguardFiles getDefaultProguardFile('proguard-android.txt')**SIGNCONFIG**
+        }
+        release {
+            minifyEnabled **MINIFY_RELEASE**
+            proguardFiles getDefaultProguardFile('proguard-android.txt')**SIGNCONFIG**
+        }
+    }
+
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }**PACKAGING_OPTIONS**
+**SPLITS**
+**LAUNCHER_TARGETS**
+**REPOSITORIES**
+}
+");
+            Debug.Log("[EOS Android Validator] Generated launcherTemplate.gradle");
+        }
+
+        private static void GenerateGradleProperties(string androidDir)
+        {
+            string path = Path.Combine(androidDir, "gradleTemplate.properties");
+            File.WriteAllText(path, @"org.gradle.jvmargs=-Xmx**JVM_HEAP_SIZE**M
+org.gradle.parallel=true
+android.useAndroidX=true
+android.enableJetifier=true
+unityStreamingAssets=**STREAMING_ASSETS**
+**ADDITIONAL_PROPERTIES**
+");
+            Debug.Log("[EOS Android Validator] Generated gradleTemplate.properties");
+        }
+
+        private static void GenerateSettingsTemplate(string androidDir)
+        {
+            string path = Path.Combine(androidDir, "settingsTemplate.gradle");
+            File.WriteAllText(path, @"pluginManagement {
+    repositories {
+        **PLUGIN_REPOSITORIES**
+        google()
+        mavenCentral()
+    }
+}
+
+include ':launcher', ':unityLibrary'
+**INCLUDES**
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+    repositories {
+        **ARTIFACTORYREPOSITORY**
+        google()
+        mavenCentral()
+        flatDir {
+            dirs ""${project(':unityLibrary').projectDir}/libs""
+        }
+    }
+}
+");
+            Debug.Log("[EOS Android Validator] Generated settingsTemplate.gradle");
         }
 
         #endregion

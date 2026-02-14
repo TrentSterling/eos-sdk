@@ -249,7 +249,7 @@ namespace EOSNative
 
             if (isNew)
             {
-                EOSDebugLogger.Log(DebugCategory.PlayerRegistry, "EOSPlayerRegistry", $"New player: {displayName} ({key.Substring(0, 8)}...)");
+                EOSDebugLogger.Log(DebugCategory.PlayerRegistry, "EOSPlayerRegistry", $"New player: {displayName} ({(key.Length > 8 ? key.Substring(0, 8) : key)}...)");
                 OnPlayerDiscovered?.Invoke(puid, displayName);
 
                 // Trim if over limit
