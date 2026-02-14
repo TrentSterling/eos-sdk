@@ -35,18 +35,40 @@ namespace EOSNative.Editor
 
         public void OnPostGenerateGradleAndroidProject(string path)
         {
+            Debug.Log($"[EOS-Native] Build processor running (callback order {callbackOrder}). Gradle project path: {path}");
+
             // path = unityLibrary module. Launcher is a sibling directory.
             string gradleRoot = Directory.GetParent(path).FullName;
             string launcherDir = Path.Combine(gradleRoot, "launcher");
             string launcherGradle = Path.Combine(launcherDir, "build.gradle");
             string unityLibGradle = Path.Combine(path, "build.gradle");
 
+            // Log gradle.properties for diagnostics
+            string gradleProps = Path.Combine(gradleRoot, "gradle.properties");
+            if (File.Exists(gradleProps))
+            {
+                string propsContent = File.ReadAllText(gradleProps);
+                // Extract key version info
+                var compileSdk = Regex.Match(propsContent, @"unity\.compileSdkVersion=(\d+)");
+                var targetSdk = Regex.Match(propsContent, @"unity\.targetSdkVersion=(\d+)");
+                var minSdk = Regex.Match(propsContent, @"unity\.minSdkVersion=(\d+)");
+                var buildTools = Regex.Match(propsContent, @"unity\.buildToolsVersion=(.+)");
+                Debug.Log($"[EOS-Native] Gradle versions — compileSdk:{(compileSdk.Success ? compileSdk.Groups[1].Value : "?")} " +
+                          $"targetSdk:{(targetSdk.Success ? targetSdk.Groups[1].Value : "?")} " +
+                          $"minSdk:{(minSdk.Success ? minSdk.Groups[1].Value : "?")} " +
+                          $"buildTools:{(buildTools.Success ? buildTools.Groups[1].Value : "?")}");
+            }
+
             // 1. Enable core library desugaring in both modules
             if (File.Exists(launcherGradle))
                 InjectDesugaring(launcherGradle, "launcher");
+            else
+                Debug.LogWarning($"[EOS-Native] launcher/build.gradle not found at: {launcherGradle}");
 
             if (File.Exists(unityLibGradle))
                 InjectDesugaring(unityLibGradle, "unityLibrary");
+            else
+                Debug.LogWarning($"[EOS-Native] unityLibrary/build.gradle not found at: {unityLibGradle}");
 
             // 2. Ensure native libs are extracted from AARs (required for EOS SDK .so loading)
             InjectExtractNativeLibs(path);
@@ -66,6 +88,8 @@ namespace EOSNative.Editor
 
             // 6. Inject ProGuard keep rules for EOS SDK Java classes (prevents R8 stripping)
             InjectProguardRules(path);
+
+            Debug.Log("[EOS-Native] Build processor complete. All Android configurations injected.");
         }
 
         private static void InjectDesugaring(string gradlePath, string moduleName)
