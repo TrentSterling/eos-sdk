@@ -122,6 +122,15 @@ namespace EOSNative
         [Tooltip("Show a Canvas-based runtime console (captures Debug.Log on mobile)")]
         [SerializeField] private bool _showConsole = true;
 
+        [Header("Debug UI")]
+        [Tooltip("Auto-create EOSHealthCheck overlay at runtime (F11 toggle)")]
+        [SerializeField] private bool _enableHealthCheckUI = true;
+
+        /// <summary>
+        /// Whether the EOSHealthCheck debug overlay should auto-create at runtime.
+        /// </summary>
+        public bool EnableHealthCheckUI => _enableHealthCheckUI;
+
 #if EOS_NETWORKING
         [Header("P2P Demo")]
         [Tooltip("Auto-create the P2P Ball Demo manager (WASD ball game with spring physics sync)")]
