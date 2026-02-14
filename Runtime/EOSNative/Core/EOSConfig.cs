@@ -31,7 +31,7 @@ namespace EOSNative
 
         [Header("Encryption")]
         [Tooltip("A 64-character hexadecimal encryption key (32 bytes) for P2P and storage encryption")]
-        public string EncryptionKey;
+        public string EncryptionKey = "";
 
         [Header("Default User Settings")]
         [Tooltip("Default display name for device token login (max 32 characters)")]
