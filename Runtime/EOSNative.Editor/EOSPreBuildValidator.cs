@@ -69,7 +69,22 @@ namespace EOSNative.Editor
                                  "Android login callbacks require a ClientId for the protocol scheme.");
             }
 
-            // 5. Custom gradle templates exist
+            // 5. Custom keystore enabled but not configured
+            // This causes "Could not get unknown property 'release' for SigningConfig container"
+            if (PlayerSettings.Android.useCustomKeystore)
+            {
+                string keystorePath = PlayerSettings.Android.keystoreName;
+                string keyAlias = PlayerSettings.Android.keyAliasName;
+                if (string.IsNullOrEmpty(keystorePath) || !File.Exists(keystorePath) || string.IsNullOrEmpty(keyAlias))
+                {
+                    Debug.LogError("[EOS-Native] PRE-BUILD: Custom Keystore is enabled but not properly configured! " +
+                                   "This will cause 'Could not get unknown property release for SigningConfig container'. " +
+                                   "Fix: configure a keystore in Publishing Settings, or uncheck Custom Keystore.");
+                    hasCritical = true;
+                }
+            }
+
+            // 6. Custom gradle templates exist
             string androidDir = Path.Combine(Application.dataPath, "Plugins", "Android");
             bool hasMainTemplate = File.Exists(Path.Combine(androidDir, "mainTemplate.gradle"));
             bool hasLauncherTemplate = File.Exists(Path.Combine(androidDir, "launcherTemplate.gradle"));
