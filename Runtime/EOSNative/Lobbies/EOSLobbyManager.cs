@@ -743,9 +743,24 @@ namespace EOSNative.Lobbies
         /// Quick match - finds and joins the first available lobby.
         /// Excludes password-protected and in-progress games.
         /// </summary>
-        public async Task<(Result result, LobbyData lobby)> QuickMatchAsync()
+        public Task<(Result result, LobbyData lobby)> QuickMatchAsync()
         {
-            var (searchResult, lobbies) = await SearchLobbiesAsync(LobbySearchOptions.QuickMatch());
+            return QuickMatchAsync(LobbySearchOptions.QuickMatch());
+        }
+
+        /// <summary>
+        /// Quick match with custom search filters.
+        /// Use LobbySearchOptions fluent builders to configure filters:
+        /// <code>
+        /// var (result, lobby) = await EOSLobbyManager.Instance.QuickMatchAsync(
+        ///     new LobbySearchOptions()
+        ///         .WithGameMode("deathmatch")
+        ///         .WithAttribute("SCENE", SceneManager.GetActiveScene().name));
+        /// </code>
+        /// </summary>
+        public async Task<(Result result, LobbyData lobby)> QuickMatchAsync(LobbySearchOptions searchOptions)
+        {
+            var (searchResult, lobbies) = await SearchLobbiesAsync(searchOptions);
 
             if (searchResult != Result.Success)
             {
@@ -795,10 +810,19 @@ namespace EOSNative.Lobbies
         /// </summary>
         /// <param name="hostOptions">Options to use if hosting is needed. If null, uses defaults.</param>
         /// <returns>Result, lobby data, and whether we became the host.</returns>
-        public async Task<(Result result, LobbyData lobby, bool didHost)> QuickMatchOrHostAsync(LobbyCreateOptions hostOptions = null)
+        public Task<(Result result, LobbyData lobby, bool didHost)> QuickMatchOrHostAsync(LobbyCreateOptions hostOptions = null)
+        {
+            return QuickMatchOrHostAsync(LobbySearchOptions.QuickMatch(), hostOptions);
+        }
+
+        /// <summary>
+        /// Quick match OR auto-host with custom search filters.
+        /// Searches using the provided filters, joins a random match, or hosts a new lobby if none found.
+        /// </summary>
+        public async Task<(Result result, LobbyData lobby, bool didHost)> QuickMatchOrHostAsync(LobbySearchOptions searchOptions, LobbyCreateOptions hostOptions = null)
         {
             // First try to find a lobby
-            var (searchResult, lobbies) = await SearchLobbiesAsync(LobbySearchOptions.QuickMatch());
+            var (searchResult, lobbies) = await SearchLobbiesAsync(searchOptions);
 
             if (searchResult == Result.Success && lobbies != null && lobbies.Count > 0)
             {
@@ -815,6 +839,27 @@ namespace EOSNative.Lobbies
             hostOptions ??= new LobbyCreateOptions();
             var (createResult, newLobby) = await CreateLobbyAsync(hostOptions);
             return (createResult, newLobby, true); // didHost = true
+        }
+
+        /// <summary>
+        /// Quick match OR auto-host using unified LobbyOptions.
+        /// The same options configure both the search filters AND the fallback host settings.
+        /// This is the simplest way to implement "Play Now":
+        /// <code>
+        /// var options = new LobbyOptions()
+        ///     .WithGameMode("deathmatch")
+        ///     .WithAttribute("SCENE", SceneManager.GetActiveScene().name)
+        ///     .WithAttribute("QUEUE", "ranked")
+        ///     .WithMaxPlayers(4)
+        ///     .ExcludePassworded()
+        ///     .ExcludeGamesInProgress();
+        ///
+        /// var (result, lobby, didHost) = await EOSLobbyManager.Instance.QuickMatchOrHostAsync(options);
+        /// </code>
+        /// </summary>
+        public Task<(Result result, LobbyData lobby, bool didHost)> QuickMatchOrHostAsync(LobbyOptions options)
+        {
+            return QuickMatchOrHostAsync(options.ToSearchOptions(), options.ToCreateOptions());
         }
 
         /// <summary>
