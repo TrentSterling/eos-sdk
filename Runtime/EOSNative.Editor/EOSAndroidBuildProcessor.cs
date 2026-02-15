@@ -43,7 +43,7 @@ namespace EOSNative.Editor
             string launcherGradle = Path.Combine(launcherDir, "build.gradle");
             string unityLibGradle = Path.Combine(path, "build.gradle");
 
-            // Log gradle.properties for diagnostics
+            // Log gradle.properties for diagnostics + auto-clamp targetSdkVersion
             string gradleProps = Path.Combine(gradleRoot, "gradle.properties");
             if (File.Exists(gradleProps))
             {
@@ -57,6 +57,18 @@ namespace EOSNative.Editor
                           $"targetSdk:{(targetSdk.Success ? targetSdk.Groups[1].Value : "?")} " +
                           $"minSdk:{(minSdk.Success ? minSdk.Groups[1].Value : "?")} " +
                           $"buildTools:{(buildTools.Success ? buildTools.Groups[1].Value : "?")}");
+
+                // Safety net: clamp targetSdkVersion to 34 if Unity generated ≥35.
+                // Unity 6.1+ can default to API 35/36 which breaks desugaring and Quest.
+                // The pre-build validator should have caught this, but if it didn't run
+                // (e.g. scripted build), fix it here in the generated gradle.properties.
+                if (targetSdk.Success && int.TryParse(targetSdk.Groups[1].Value, out int targetSdkInt) && targetSdkInt >= 35)
+                {
+                    propsContent = Regex.Replace(propsContent, @"unity\.targetSdkVersion=\d+", "unity.targetSdkVersion=34");
+                    File.WriteAllText(gradleProps, propsContent);
+                    Debug.LogWarning($"[EOS-Native] Clamped targetSdkVersion from {targetSdkInt} to 34 in gradle.properties. " +
+                                     "API 35+ causes desugaring/gradle errors. Set Target API Level to 34 in Player Settings to avoid this.");
+                }
             }
 
             // 1. Enable core library desugaring in both modules

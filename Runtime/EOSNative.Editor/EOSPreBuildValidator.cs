@@ -43,18 +43,22 @@ namespace EOSNative.Editor
                 hasCritical = true;
             }
 
-            // 3. targetSdkVersion < 35
+            // 3. targetSdkVersion — auto-clamp to 34 if too high or Automatic.
+            // Unity 6.1+ defaults to API 35/36 which causes desugaring/gradle errors
+            // and Quest doesn't support API 35+ yet. Auto-fix to 34 (Android 14).
             int targetSdk = (int)PlayerSettings.Android.targetSdkVersion;
             if (targetSdk >= 35)
             {
-                Debug.LogWarning($"[EOS-Native] PRE-BUILD: targetSdkVersion is {targetSdk}. " +
-                                 "API 35+ may cause desugaring/gradle errors. Consider using 32-34.");
+                PlayerSettings.Android.targetSdkVersion = (AndroidSdkVersions)34;
+                Debug.LogWarning($"[EOS-Native] PRE-BUILD: targetSdkVersion was {targetSdk} (API 35+ causes " +
+                                 "desugaring/gradle errors). Auto-set to 34 (Android 14).");
             }
             else if (targetSdk == 0)
             {
-                Debug.LogWarning("[EOS-Native] PRE-BUILD: targetSdkVersion is Automatic (highest installed). " +
-                                 "Unity 6.1+ may default to API 35/36 which can cause gradle errors. " +
-                                 "Consider setting a specific version (32-34).");
+                // 0 = Automatic (highest installed). Unity 6.1+ ships with SDK 35/36.
+                PlayerSettings.Android.targetSdkVersion = (AndroidSdkVersions)34;
+                Debug.LogWarning("[EOS-Native] PRE-BUILD: targetSdkVersion was Automatic (highest installed). " +
+                                 "Unity 6.1+ defaults to API 35/36 which causes gradle errors. Auto-set to 34 (Android 14).");
             }
 
             // 4. EOSConfig asset exists
