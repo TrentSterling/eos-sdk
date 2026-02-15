@@ -369,6 +369,7 @@ namespace EOSNative.Editor
             CheckEOSConfig();
             CheckEOSAarPresent();
             CheckInternetPermission();
+            CheckKeystoreConfig();
 
             // Log summary
             int fail = _checks.Count(c => c.Status == CheckStatus.Fail);
@@ -862,6 +863,66 @@ namespace EOSNative.Editor
                 Detail = "Unity adds android.permission.INTERNET automatically. " +
                          "RECORD_AUDIO and ACCESS_WIFI_STATE are injected by the build processor."
             });
+        }
+
+        private void CheckKeystoreConfig()
+        {
+            // Detect the common "Could not get unknown property 'release' for SigningConfig container" error.
+            // This happens when Custom Keystore is enabled but not properly configured — Unity generates
+            // signingConfigs.release references in buildTypes but never defines the signingConfigs block.
+            bool useCustom = PlayerSettings.Android.useCustomKeystore;
+
+            if (!useCustom)
+            {
+                _checks.Add(new Check
+                {
+                    Name = "Signing Config",
+                    Status = CheckStatus.Pass,
+                    Detail = "Custom keystore not enabled — Unity will use the default debug signing config."
+                });
+                return;
+            }
+
+            // Custom keystore is enabled — validate it's actually configured
+            string keystorePath = PlayerSettings.Android.keystoreName;
+            string keyAlias = PlayerSettings.Android.keyAliasName;
+            var issues = new List<string>();
+
+            if (string.IsNullOrEmpty(keystorePath))
+                issues.Add("Keystore path is empty");
+            else if (!File.Exists(keystorePath))
+                issues.Add($"Keystore file not found: {keystorePath}");
+
+            if (string.IsNullOrEmpty(keyAlias))
+                issues.Add("Key alias is empty");
+
+            if (issues.Count > 0)
+            {
+                _checks.Add(new Check
+                {
+                    Name = "Signing Config",
+                    Status = CheckStatus.Fail,
+                    Detail = "Custom Keystore is ENABLED but not properly configured:\n" +
+                             string.Join("\n", issues.Select(i => $"  - {i}")) + "\n" +
+                             "This causes: 'Could not get unknown property release for SigningConfig container' at build time.",
+                    Fix = "Either configure a keystore in Player Settings > Publishing Settings > Keystore Manager, " +
+                          "or uncheck 'Custom Keystore' to use the default debug signing.",
+                    AutoFix = () =>
+                    {
+                        PlayerSettings.Android.useCustomKeystore = false;
+                        Debug.Log("[EOS Android Validator] Disabled Custom Keystore — using default debug signing");
+                    }
+                });
+            }
+            else
+            {
+                _checks.Add(new Check
+                {
+                    Name = "Signing Config",
+                    Status = CheckStatus.Pass,
+                    Detail = $"Custom keystore configured: {Path.GetFileName(keystorePath)} (alias: {keyAlias})"
+                });
+            }
         }
 
         #endregion
