@@ -115,23 +115,26 @@ namespace EOSNative.Editor
             else
                 Debug.LogWarning($"[EOS-Native] unityLibrary/build.gradle not found at: {unityLibGradle}");
 
-            // 2. Ensure native libs are extracted from AARs (required for EOS SDK .so loading)
+            // 2. Fix .androidlib modules missing namespace (AGP 8.x / Unity 6.1+ requirement)
+            FixAndroidLibNamespaces(path);
+
+            // 3. Ensure native libs are extracted from AARs (required for EOS SDK .so loading)
             InjectExtractNativeLibs(path);
 
-            // 3. Inject eos_login_protocol_scheme string resource
+            // 4. Inject eos_login_protocol_scheme string resource
             InjectEosLoginScheme(path);
 
-            // 4. Generate Java helper that calls System.loadLibrary("EOSSDK") from Java classloader context.
+            // 5. Generate Java helper that calls System.loadLibrary("EOSSDK") from Java classloader context.
             // This is CRITICAL: when System.loadLibrary is called from Java code compiled into the APK,
             // JNI_OnLoad's FindClass uses the caller's (app) classloader, so RegisterNatives succeeds
             // for EOSLogger and other native methods. Without this, dlopen from P/Invoke uses the
             // system classloader, which can't find app classes → UnsatisfiedLinkError.
             InjectJavaInitHelper(path);
 
-            // 5. Inject required permissions for EOS features (voice, networking)
+            // 6. Inject required permissions for EOS features (voice, networking)
             InjectPermissions(path);
 
-            // 6. Inject ProGuard keep rules for EOS SDK Java classes (prevents R8 stripping)
+            // 7. Inject ProGuard keep rules for EOS SDK Java classes (prevents R8 stripping)
             InjectProguardRules(path);
 
             Debug.Log("[EOS-Native] Build processor complete. All Android configurations injected.");
@@ -248,6 +251,95 @@ namespace EOSNative.Editor
                 Debug.LogError($"[EOS-Native] VERIFICATION FAILED: {moduleName}/build.gradle is missing desugar_jdk_libs dependency after injection! " +
                                "Fix: Use custom gradle templates (Tools > EOS SDK > Android Build Validator > Generate EOS Gradle Templates).");
             }
+        }
+
+        private static void FixAndroidLibNamespaces(string unityLibPath)
+        {
+            // AGP 8.x (Unity 6.1+) requires all Android library modules to declare a `namespace`
+            // in build.gradle. Legacy .androidlib modules (e.g. EosResources.androidlib,
+            // eos_dependencies.androidlib) use the old project.properties format and lack this.
+            // Without it: "Namespace not specified. Specify a namespace in the module's build file"
+            //
+            // We scan all .androidlib dirs under unityLibrary and auto-fix any that are missing namespace.
+            if (!Directory.Exists(unityLibPath))
+                return;
+
+            string[] androidLibDirs = Directory.GetDirectories(unityLibPath, "*.androidlib");
+            if (androidLibDirs.Length == 0)
+                return;
+
+            foreach (string libDir in androidLibDirs)
+            {
+                string libName = Path.GetFileName(libDir);
+                string buildGradle = Path.Combine(libDir, "build.gradle");
+
+                // Extract namespace from AndroidManifest.xml package attribute
+                string manifestPath = Path.Combine(libDir, "AndroidManifest.xml");
+                string ns = null;
+                if (File.Exists(manifestPath))
+                {
+                    string manifestContent = File.ReadAllText(manifestPath);
+                    var packageMatch = Regex.Match(manifestContent, @"package\s*=\s*""([^""]+)""");
+                    if (packageMatch.Success)
+                        ns = packageMatch.Groups[1].Value;
+                }
+
+                if (string.IsNullOrEmpty(ns))
+                {
+                    // Derive namespace from directory name as fallback
+                    ns = "com.unity." + Path.GetFileNameWithoutExtension(libDir).Replace("-", ".").Replace("_", ".").ToLower();
+                }
+
+                if (File.Exists(buildGradle))
+                {
+                    // build.gradle exists — check if namespace is already declared
+                    string content = File.ReadAllText(buildGradle);
+                    if (!Regex.IsMatch(content, @"\bnamespace\s"))
+                    {
+                        // Inject namespace into android {} block
+                        if (Regex.IsMatch(content, @"android\s*\{"))
+                        {
+                            content = Regex.Replace(content, @"(android\s*\{)", $"$1\n    namespace \"{ns}\"");
+                            File.WriteAllText(buildGradle, content);
+                            Debug.Log($"[EOS-Native] Injected namespace \"{ns}\" into {libName}/build.gradle");
+                        }
+                        else
+                        {
+                            // No android block — append one
+                            content += $"\nandroid {{\n    namespace \"{ns}\"\n}}\n";
+                            File.WriteAllText(buildGradle, content);
+                            Debug.Log($"[EOS-Native] Added android block with namespace \"{ns}\" to {libName}/build.gradle");
+                        }
+                    }
+                }
+                else
+                {
+                    // No build.gradle at all (legacy project.properties-only format).
+                    // Generate a minimal build.gradle with namespace.
+                    string gradleContent =
+                        "apply plugin: 'com.android.library'\n\n" +
+                        "android {\n" +
+                        $"    namespace \"{ns}\"\n" +
+                        "    compileSdkVersion 34\n" +
+                        "    defaultConfig {\n" +
+                        "        targetSdkVersion 34\n" +
+                        "    }\n" +
+                        "    sourceSets {\n" +
+                        "        main {\n" +
+                        "            manifest.srcFile 'AndroidManifest.xml'\n" +
+                        "            java.srcDirs = ['src']\n" +
+                        "            res.srcDirs = ['res']\n" +
+                        "            assets.srcDirs = ['assets']\n" +
+                        "            jniLibs.srcDirs = ['libs']\n" +
+                        "        }\n" +
+                        "    }\n" +
+                        "}\n";
+                    File.WriteAllText(buildGradle, gradleContent);
+                    Debug.Log($"[EOS-Native] Generated build.gradle for {libName} (namespace: \"{ns}\")");
+                }
+            }
+
+            Debug.Log($"[EOS-Native] Checked {androidLibDirs.Length} .androidlib module(s) for namespace declarations.");
         }
 
         private static void InjectExtractNativeLibs(string unityLibPath)

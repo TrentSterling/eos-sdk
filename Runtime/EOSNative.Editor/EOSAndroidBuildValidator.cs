@@ -370,6 +370,7 @@ namespace EOSNative.Editor
             CheckEOSAarPresent();
             CheckInternetPermission();
             CheckKeystoreConfig();
+            CheckAndroidLibNamespaces();
 
             // Log summary
             int fail = _checks.Count(c => c.Status == CheckStatus.Fail);
@@ -921,6 +922,64 @@ namespace EOSNative.Editor
                     Name = "Signing Config",
                     Status = CheckStatus.Pass,
                     Detail = $"Custom keystore configured: {Path.GetFileName(keystorePath)} (alias: {keyAlias})"
+                });
+            }
+        }
+
+        private void CheckAndroidLibNamespaces()
+        {
+            // AGP 8.x (Unity 6.1+) requires namespace in all .androidlib modules.
+            // Legacy modules using only project.properties + AndroidManifest.xml will fail with:
+            // "Namespace not specified. Specify a namespace in the module's build file"
+            // The build processor auto-fixes this at build time, but warn users here too.
+            string[] androidLibDirs = Directory.Exists(_pluginsAndroidPath)
+                ? Directory.GetDirectories(_pluginsAndroidPath, "*.androidlib")
+                : System.Array.Empty<string>();
+
+            if (androidLibDirs.Length == 0)
+            {
+                // No androidlib modules — nothing to check
+                return;
+            }
+
+            var issues = new List<string>();
+            foreach (string libDir in androidLibDirs)
+            {
+                string libName = Path.GetFileName(libDir);
+                string buildGradle = Path.Combine(libDir, "build.gradle");
+
+                if (!File.Exists(buildGradle))
+                {
+                    issues.Add($"{libName}: no build.gradle (legacy project.properties format)");
+                }
+                else
+                {
+                    string content = File.ReadAllText(buildGradle);
+                    if (!Regex.IsMatch(content, @"\bnamespace\s"))
+                        issues.Add($"{libName}: build.gradle has no namespace declaration");
+                }
+            }
+
+            if (issues.Count > 0)
+            {
+                _checks.Add(new Check
+                {
+                    Name = "Android Library Namespaces",
+                    Status = CheckStatus.Warning,
+                    Detail = $"{issues.Count} .androidlib module(s) missing namespace (required by AGP 8.x / Unity 6.1+):\n" +
+                             string.Join("\n", issues.Select(i => $"  - {i}")) + "\n" +
+                             "The build processor will auto-fix these at build time, but updating the source files is recommended.",
+                    Fix = "Add 'namespace \"com.yourpackage.name\"' to each module's build.gradle, " +
+                          "or let the build processor handle it automatically."
+                });
+            }
+            else
+            {
+                _checks.Add(new Check
+                {
+                    Name = "Android Library Namespaces",
+                    Status = CheckStatus.Pass,
+                    Detail = $"{androidLibDirs.Length} .androidlib module(s) all have namespace declarations."
                 });
             }
         }
