@@ -87,13 +87,58 @@ Find and join the first available lobby automatically:
 var (result, lobby) = await lobbyManager.QuickMatchAsync();
 ```
 
+With filters (game mode, scene, custom attributes):
+
+```csharp
+var (result, lobby) = await lobbyManager.QuickMatchAsync(
+    new LobbySearchOptions()
+        .WithGameMode("deathmatch")
+        .WithAttribute("SCENE", SceneManager.GetActiveScene().name)
+        .WithAttribute("QUEUE", "ranked"));
+```
+
 ### Quick Match or Host
 
-Find an available lobby, or create one if none exist (recommended for "Play Now" buttons):
+Find an available lobby, or create one if none exist. This is the recommended way to implement "Play Now" buttons.
+
+Basic (no filters):
 
 ```csharp
 var (result, lobby, didHost) = await lobbyManager.QuickMatchOrHostAsync();
 Debug.Log(didHost ? "Hosting new lobby" : "Joined existing lobby");
+```
+
+With `LobbyOptions` — one object configures both the search filters AND fallback host settings:
+
+```csharp
+var options = new LobbyOptions()
+    .WithGameMode("deathmatch")
+    .WithAttribute("SCENE", SceneManager.GetActiveScene().name)
+    .WithAttribute("QUEUE", "ranked")
+    .WithMaxPlayers(4)
+    .ExcludePassworded()
+    .ExcludeGamesInProgress();
+
+var (result, lobby, didHost) = await lobbyManager.QuickMatchOrHostAsync(options);
+// If no matching lobby found, hosts a new one with the same settings
+```
+
+With separate search + host options:
+
+```csharp
+var searchOptions = new LobbySearchOptions()
+    .WithGameMode("deathmatch")
+    .WithRegion("us-east");
+
+var hostOptions = new LobbyCreateOptions
+{
+    GameMode = "deathmatch",
+    Region = "us-east",
+    MaxPlayers = 8,
+    EnableVoice = true
+};
+
+var (result, lobby, didHost) = await lobbyManager.QuickMatchOrHostAsync(searchOptions, hostOptions);
 ```
 
 ### Skill-Based Matchmaking
@@ -254,6 +299,39 @@ var (result, lobby) = await lobbyManager.CreateLobbyAsync(options);
 ```
 
 Passwords are stored as SHA256 hashes in lobby attributes -- the actual password is never sent over the network.
+
+## Unified LobbyOptions
+
+`LobbyOptions` is a single class that configures both create and search operations. Fields that don't apply to a given operation are ignored. This is the easiest way to set up matchmaking:
+
+```csharp
+// One options object, used for everything
+var options = new LobbyOptions()
+    .WithGameMode("coop")
+    .WithMap("forest")
+    .WithMaxPlayers(4)
+    .WithAttribute("QUEUE", "casual")
+    .WithVoice()
+    .ExcludePassworded()
+    .ExcludeGamesInProgress();
+
+// Search uses GameMode, Map, QUEUE as filters
+var (searchResult, lobbies) = await lobbyManager.SearchLobbiesAsync(options.ToSearchOptions());
+
+// Create uses GameMode, Map, MaxPlayers, Voice, QUEUE as lobby settings
+var (createResult, lobby) = await lobbyManager.CreateLobbyAsync(options.ToCreateOptions());
+
+// Or just use QuickMatchOrHost — it does both automatically
+var (result, lobby2, didHost) = await lobbyManager.QuickMatchOrHostAsync(options);
+```
+
+Factory presets:
+
+```csharp
+var quickMatch = LobbyOptions.QuickMatch();
+var ranked = LobbyOptions.ForSkillRange(playerSkill: 1500, range: 200);
+var coop = LobbyOptions.ForGameMode("coop");
+```
 
 ## Crossplay Filtering
 
