@@ -18,8 +18,41 @@ namespace EOSNative.Editor
     /// </summary>
     public class EOSAndroidBuildProcessor : IPostGenerateGradleAndroidProject
     {
-        private const string DesugarDep = "coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'";
         private const string DesugarOption = "coreLibraryDesugaringEnabled true";
+
+        // Desugaring version adapts to Unity/AGP version:
+        // - Unity 6.1+ (AGP 8.x): desugar_jdk_libs 2.1.4 + Java 17
+        // - Unity 6.0  (AGP 7.x): desugar_jdk_libs 2.0.4 + Java 11
+        // - Unity 2021-2022 (AGP 4-7): desugar_jdk_libs 1.2.3 + Java 8
+        private static string DesugarVersion
+        {
+            get
+            {
+#if UNITY_6000_1_OR_NEWER
+                return "2.1.4";
+#elif UNITY_6000_0_OR_NEWER
+                return "2.0.4";
+#else
+                return "1.2.3";
+#endif
+            }
+        }
+
+        private static string DesugarDep => $"coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:{DesugarVersion}'";
+
+        private static string JavaVersionString
+        {
+            get
+            {
+#if UNITY_6000_1_OR_NEWER
+                return "VERSION_17";
+#elif UNITY_6000_0_OR_NEWER
+                return "VERSION_11";
+#else
+                return "VERSION_1_8";
+#endif
+            }
+        }
 
         // AndroidX dependencies required by the EOS AAR. Unity doesn't resolve transitive Maven
         // dependencies from AARs, so we must add them explicitly. Versions match PlayEveryWare reference.
@@ -130,8 +163,8 @@ namespace EOSNative.Editor
                         @"(android\s*\{)",
                         "$1\n    compileOptions {\n" +
                         $"        {DesugarOption}\n" +
-                        "        sourceCompatibility JavaVersion.VERSION_17\n" +
-                        "        targetCompatibility JavaVersion.VERSION_17\n" +
+                        $"        sourceCompatibility JavaVersion.{JavaVersionString}\n" +
+                        $"        targetCompatibility JavaVersion.{JavaVersionString}\n" +
                         "    }");
                     modified = true;
                 }

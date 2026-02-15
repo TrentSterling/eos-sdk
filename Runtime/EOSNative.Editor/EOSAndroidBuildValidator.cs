@@ -56,6 +56,35 @@ namespace EOSNative.Editor
         private static readonly Color Cyan = new(0.3f, 0.85f, 1f);
         private static readonly Color Gray = new(0.6f, 0.6f, 0.6f);
 
+        // Desugaring version adapts to Unity/AGP version (matches EOSAndroidBuildProcessor)
+        private static string DesugarVersion
+        {
+            get
+            {
+#if UNITY_6000_1_OR_NEWER
+                return "2.1.4";
+#elif UNITY_6000_0_OR_NEWER
+                return "2.0.4";
+#else
+                return "1.2.3";
+#endif
+            }
+        }
+
+        private static string JavaVersionString
+        {
+            get
+            {
+#if UNITY_6000_1_OR_NEWER
+                return "VERSION_17";
+#elif UNITY_6000_0_OR_NEWER
+                return "VERSION_11";
+#else
+                return "VERSION_1_8";
+#endif
+            }
+        }
+
         #endregion
 
         #region Menu
@@ -160,7 +189,7 @@ namespace EOSNative.Editor
             EditorGUILayout.LabelField(
                 "If your Android build fails with 'FakeDependency.jar' transform errors, " +
                 "generating custom gradle templates is the most reliable fix. Templates pre-configure " +
-                "desugaring, AndroidX deps, and Java 17 so the build processor doesn't have to inject them.",
+                "desugaring, AndroidX deps, and Java compatibility so the build processor doesn't have to inject them.",
                 _instructionStyle);
             GUI.backgroundColor = new Color(1f, 0.6f, 0.1f); // Orange
             if (GUILayout.Button("Generate EOS Gradle Templates", GUILayout.Height(28)))
@@ -294,7 +323,7 @@ namespace EOSNative.Editor
 
             EditorGUILayout.LabelField("Into dependencies {} block:", EditorStyles.miniLabel);
             EditorGUILayout.TextArea(
-                "coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'\n" +
+                $"coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:{DesugarVersion}'\n" +
                 "implementation 'androidx.appcompat:appcompat:1.5.1'\n" +
                 "implementation 'androidx.constraintlayout:constraintlayout:2.1.4'\n" +
                 "implementation 'androidx.security:security-crypto:1.0.0'\n" +
@@ -610,17 +639,17 @@ namespace EOSNative.Editor
 
             // If template has a different desugar_jdk_libs version that could conflict
             var versionMatch = Regex.Match(content, @"desugar_jdk_libs:(\d+\.\d+\.\d+)");
-            if (versionMatch.Success && versionMatch.Groups[1].Value != "2.1.4")
+            if (versionMatch.Success && versionMatch.Groups[1].Value != DesugarVersion)
             {
                 issues.Add($"{templateName}: has desugar_jdk_libs:{versionMatch.Groups[1].Value} " +
-                           $"— EOSAndroidBuildProcessor expects 2.1.4. Version mismatch may cause issues.");
+                           $"— EOSAndroidBuildProcessor expects {DesugarVersion}. Version mismatch may cause issues.");
             }
 
             // Check for missing compileOptions block (processor needs it to inject into)
             if (!content.Contains("compileOptions"))
             {
                 issues.Add($"{templateName}: no compileOptions block — processor may fail to inject desugaring. " +
-                           "Add: compileOptions {{ sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }}");
+                           $"Add: compileOptions {{ sourceCompatibility JavaVersion.{JavaVersionString}; targetCompatibility JavaVersion.{JavaVersionString} }}");
             }
         }
 
@@ -840,6 +869,17 @@ namespace EOSNative.Editor
         #region Gradle Template Generator
 
         /// <summary>
+        /// Write a gradle template file, adapting desugaring/Java versions for current Unity version.
+        /// </summary>
+        private static void WriteTemplate(string path, string content)
+        {
+            content = content
+                .Replace("desugar_jdk_libs:2.1.4", $"desugar_jdk_libs:{DesugarVersion}")
+                .Replace("JavaVersion.VERSION_17", $"JavaVersion.{JavaVersionString}");
+            File.WriteAllText(path, content);
+        }
+
+        /// <summary>
         /// Generate all 4 gradle template files with EOS desugaring pre-configured.
         /// Templates use Unity's **VARIABLE** placeholders for portability.
         /// </summary>
@@ -899,7 +939,7 @@ namespace EOSNative.Editor
             string path = Path.Combine(androidDir, "mainTemplate.gradle");
             if (IsUnity6_1OrNewer())
             {
-                File.WriteAllText(path, @"apply plugin: 'com.android.library'
+                WriteTemplate(path, @"apply plugin: 'com.android.library'
 **APPLY_PLUGINS**
 
 dependencies {
@@ -950,7 +990,7 @@ android {
             }
             else
             {
-                File.WriteAllText(path, @"apply plugin: 'com.android.library'
+                WriteTemplate(path, @"apply plugin: 'com.android.library'
 **APPLY_PLUGINS**
 
 dependencies {
@@ -1007,7 +1047,7 @@ android {
             string path = Path.Combine(androidDir, "launcherTemplate.gradle");
             if (IsUnity6_1OrNewer())
             {
-                File.WriteAllText(path, @"apply plugin: 'com.android.application'
+                WriteTemplate(path, @"apply plugin: 'com.android.application'
 **APPLY_PLUGINS**
 
 dependencies {
@@ -1052,7 +1092,7 @@ android {
         noCompress = **BUILTIN_NOCOMPRESS** + unityStreamingAssets.tokenize(', ')
         ignoreAssetsPattern = ""!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~""
     }
-
+**SIGN**
     buildTypes {
         debug {
             minifyEnabled **MINIFY_DEBUG**
@@ -1076,7 +1116,7 @@ android {
             }
             else
             {
-                File.WriteAllText(path, @"apply plugin: 'com.android.application'
+                WriteTemplate(path, @"apply plugin: 'com.android.application'
 **APPLY_PLUGINS**
 
 dependencies {
@@ -1119,7 +1159,7 @@ android {
     lintOptions {
         abortOnError false
     }
-
+**SIGN**
     buildTypes {
         debug {
             minifyEnabled **MINIFY_DEBUG**
