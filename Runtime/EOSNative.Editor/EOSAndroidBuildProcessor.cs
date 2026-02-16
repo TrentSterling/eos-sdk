@@ -1,5 +1,6 @@
 #if UNITY_ANDROID
 using System.IO;
+using System.IO.Compression;
 using System.Text.RegularExpressions;
 using System.Xml;
 using UnityEditor;
@@ -142,8 +143,175 @@ namespace EOSNative.Editor
             // 8. Inject ProGuard keep rules for EOS SDK Java classes (prevents R8 stripping)
             InjectProguardRules(path);
 
+            // 9. Unity 2022 D8 workaround: AGP 7.4.2's D8 (R8 8.2.2-dev) crashes with NPE on
+            //    Java 11 class files in the EOS AAR. Pre-dexed classes bypass the broken D8.
+            PatchAarForLegacyD8(path);
+
             Debug.Log("[EOS-Native] Build processor complete. All Android configurations injected.");
         }
+
+        private static void PatchAarForLegacyD8(string unityLibPath)
+        {
+#if UNITY_6000_0_OR_NEWER
+            // Unity 6+ ships AGP 8.x with a working D8 — no patch needed.
+            return;
+#else
+            // AGP 7.4.2 (Unity 2022) bundles D8/R8 8.2.2-dev which crashes with NPE on Java 11
+            // class files that have NestHost/NestMembers attributes or the $values() enum pattern.
+            // The EOS SDK AAR (eossdk-StaticSTDC-release.aar) contains 35 Java 11 classes, 20 of
+            // which trigger this D8 bug. Fix: replace classes.jar in the AAR with an empty JAR,
+            // and include a pre-dexed version (dexed with a working D8) as a separate dependency.
+            //
+            // The pre-dexed JAR (eos-classes-predexed.jar) contains classes.dex produced by
+            // Unity 6's D8 (build-tools 36.0.0). AGP's dexing transform passes .dex entries
+            // through without running D8, so the broken D8 never touches the EOS classes.
+
+            string libsDir = Path.Combine(unityLibPath, "libs");
+            string aarPath = Path.Combine(libsDir, "eossdk-StaticSTDC-release.aar");
+
+            if (!File.Exists(aarPath))
+            {
+                Debug.LogWarning("[EOS-Native] D8 workaround: EOS AAR not found at " + aarPath);
+                return;
+            }
+
+            // Find the pre-dexed JAR shipped with the SDK package
+            string predexedJar = FindPreDexedJar();
+            if (string.IsNullOrEmpty(predexedJar))
+            {
+                Debug.LogError("[EOS-Native] D8 workaround: eos-classes-predexed.jar not found in SDK package. " +
+                               "Unity 2022 Android builds will fail with D8 NullPointerException. " +
+                               "Ensure the com.tront.eos-sdk package contains eos-classes-predexed.jar.");
+                return;
+            }
+
+            // Find the compile-only classes JAR (original Java bytecode for javac)
+            string compileJar = FindCompileJar();
+            if (string.IsNullOrEmpty(compileJar))
+            {
+                Debug.LogError("[EOS-Native] D8 workaround: eos-classes-compile.jar not found in SDK package.");
+                return;
+            }
+
+            try
+            {
+                // Step 1: Replace classes.jar inside the AAR with an empty JAR.
+                // This prevents AGP 7.4.2's broken D8 from processing the Java 11 class files.
+                string tempAar = aarPath + ".tmp";
+                EmptyClassesJarInAar(aarPath, tempAar);
+                File.Delete(aarPath);
+                File.Move(tempAar, aarPath);
+
+                // Step 2: Copy pre-dexed JAR to libs/ — AGP's dexing transform passes .dex
+                // entries through without running D8, so the EOS classes end up in the APK.
+                string predexedDest = Path.Combine(libsDir, "eos-classes-predexed.jar");
+                File.Copy(predexedJar, predexedDest, true);
+
+                // Step 3: Copy compile-only JAR to a separate directory — javac needs the
+                // original .class files to resolve references (e.g. EOSNativeLoader calls EOSSDK.init).
+                string compileDir = Path.Combine(unityLibPath, "eos-compile");
+                if (!Directory.Exists(compileDir))
+                    Directory.CreateDirectory(compileDir);
+                string compileDest = Path.Combine(compileDir, "eos-classes-compile.jar");
+                File.Copy(compileJar, compileDest, true);
+
+                // Step 4: Add compileOnly dependency to build.gradle so javac sees the classes
+                // but the dexing transform does NOT process them (avoiding the D8 crash).
+                string buildGradle = Path.Combine(unityLibPath, "build.gradle");
+                if (File.Exists(buildGradle))
+                {
+                    string content = File.ReadAllText(buildGradle);
+                    string compileOnlyDep = "compileOnly fileTree(dir: 'eos-compile', include: ['*.jar'])";
+                    if (!content.Contains("eos-compile"))
+                    {
+                        content = Regex.Replace(
+                            content,
+                            @"(dependencies\s*\{)",
+                            $"$1\n    {compileOnlyDep}");
+                        File.WriteAllText(buildGradle, content);
+                    }
+                }
+
+                Debug.Log("[EOS-Native] D8 workaround applied: emptied AAR classes.jar, " +
+                          "added pre-dexed DEX to libs/, added compile-only classes for javac. " +
+                          "AGP's broken D8 will not process EOS Java classes.");
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"[EOS-Native] D8 workaround failed: {ex.Message}\n{ex.StackTrace}");
+            }
+#endif
+        }
+
+        private static void EmptyClassesJarInAar(string inputAar, string outputAar)
+        {
+            // Create an empty JAR (just a ZIP with META-INF/MANIFEST.MF)
+            byte[] emptyJar;
+            using (var ms = new MemoryStream())
+            {
+                using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, true))
+                {
+                    var entry = zip.CreateEntry("META-INF/MANIFEST.MF");
+                    using (var writer = new StreamWriter(entry.Open()))
+                    {
+                        writer.Write("Manifest-Version: 1.0\n");
+                    }
+                }
+                emptyJar = ms.ToArray();
+            }
+
+            // Copy AAR, replacing classes.jar with the empty version
+            using (var inputStream = new FileStream(inputAar, FileMode.Open, FileAccess.Read))
+            using (var inputZip = new ZipArchive(inputStream, ZipArchiveMode.Read))
+            using (var outputStream = new FileStream(outputAar, FileMode.Create))
+            using (var outputZip = new ZipArchive(outputStream, ZipArchiveMode.Create))
+            {
+                foreach (var srcEntry in inputZip.Entries)
+                {
+                    var dstEntry = outputZip.CreateEntry(srcEntry.FullName, System.IO.Compression.CompressionLevel.Optimal);
+                    using (var dstStream = dstEntry.Open())
+                    {
+                        if (srcEntry.FullName == "classes.jar")
+                        {
+                            dstStream.Write(emptyJar, 0, emptyJar.Length);
+                        }
+                        else
+                        {
+                            using (var srcStream = srcEntry.Open())
+                            {
+                                srcStream.CopyTo(dstStream);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        private static string FindSdkJar(string baseName)
+        {
+            // Search for a JAR in the SDK package by base name (without extension)
+            string[] guids = AssetDatabase.FindAssets(baseName);
+            foreach (string guid in guids)
+            {
+                string assetPath = AssetDatabase.GUIDToAssetPath(guid);
+                if (assetPath.EndsWith(".jar"))
+                {
+                    string fullPath = Path.GetFullPath(assetPath);
+                    if (File.Exists(fullPath))
+                        return fullPath;
+                }
+            }
+
+            // Fallback: known package path
+            string fallback = Path.GetFullPath($"Packages/com.tront.eos-sdk/Runtime/EOSSDK/Plugins/Android/{baseName}.jar");
+            if (File.Exists(fallback))
+                return fallback;
+
+            return null;
+        }
+
+        private static string FindPreDexedJar() => FindSdkJar("eos-classes-predexed");
+        private static string FindCompileJar() => FindSdkJar("eos-classes-compile");
 
         private static void EnsureSettingsRepositories(string gradleRoot)
         {
@@ -223,6 +391,15 @@ namespace EOSNative.Editor
             string content = File.ReadAllText(gradlePath);
             bool modified = false;
 
+#if !UNITY_6000_0_OR_NEWER
+            // Unity 2022 (AGP 7.4.2) has a D8 dexer bug that crashes with StackOverflowError +
+            // NullPointerException when core library desugaring is enabled and processing the large
+            // EOS SDK AAR (~37MB). PlayEveryWare's official EOS plugin also ships without desugaring
+            // on Unity 2022. Skip desugaring injection; only inject AndroidX deps and lint fixes.
+            Debug.Log($"[EOS-Native] Skipping core library desugaring for {moduleName} (Unity 2022 / AGP 7.4.2 D8 workaround)");
+            goto SkipDesugaring;
+#endif
+
             // Add coreLibraryDesugaringEnabled to compileOptions block
             if (!content.Contains("coreLibraryDesugaringEnabled"))
             {
@@ -275,6 +452,13 @@ namespace EOSNative.Editor
                 modified = true;
             }
 
+#if !UNITY_6000_0_OR_NEWER
+            SkipDesugaring:
+            // Re-read content in case it was not modified above (goto skipped desugaring injection)
+            content = File.ReadAllText(gradlePath);
+            modified = false;
+#endif
+
             // Add AndroidX dependencies required by EOS AAR
             foreach (string dep in AndroidXDeps)
             {
@@ -318,6 +502,8 @@ namespace EOSNative.Editor
 
             // Post-injection verification: re-read and confirm critical entries are present
             string verification = File.ReadAllText(gradlePath);
+#if UNITY_6000_0_OR_NEWER
+            // Only verify desugaring on Unity 6+ where it's safe to use
             if (!verification.Contains("coreLibraryDesugaringEnabled true"))
             {
                 Debug.LogError($"[EOS-Native] VERIFICATION FAILED: {moduleName}/build.gradle is missing 'coreLibraryDesugaringEnabled true' after injection! " +
@@ -329,6 +515,7 @@ namespace EOSNative.Editor
                 Debug.LogError($"[EOS-Native] VERIFICATION FAILED: {moduleName}/build.gradle is missing desugar_jdk_libs dependency after injection! " +
                                "Fix: Use custom gradle templates (Tools > EOS SDK > Android Build Validator > Generate EOS Gradle Templates).");
             }
+#endif
 
             // Disable lint release build checks to work around R8/D8 crash in generateReleaseLintModel.
             // AGP 8.x has a known bug where D8BackportedMethodsGenerator crashes with NPE on

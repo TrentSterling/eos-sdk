@@ -1,6 +1,8 @@
 # Android / Quest Builds
 
-Building for Android (including Meta Quest) requires additional Gradle configuration because the EOS SDK's AAR library uses Java 8 APIs that need D8 desugaring. This page covers the setup process and common issues.
+Building for Android (including Meta Quest) requires additional Gradle configuration because the EOS SDK's AAR library uses Java 8+ APIs that need D8 desugaring. The build processor handles all configuration automatically, including version-specific workarounds for Unity 2022 through Unity 6.
+
+**Tested Unity versions:** 2022.3, 6000.0, 6000.1, 6000.3 -- all produce working APKs.
 
 ## Quick Setup
 
@@ -60,7 +62,46 @@ The `EOSAndroidBuildProcessor` runs automatically at callback order 99 during An
 
 The build processor acts as a safety net. Even if your Gradle templates are correct, it verifies and patches the generated Gradle project as a final step.
 
+## Unity Version Compatibility
+
+The build processor automatically adapts its configuration based on your Unity version:
+
+| | Unity 2022.3 | Unity 6000.0 | Unity 6000.1+ |
+|---|---|---|---|
+| AGP | 7.4.2 | ~8.x | 8.x |
+| Java Version | 1.8 | 11 | 17 |
+| Desugaring | Skipped (D8 bug) | 2.0.4 | 2.1.4 |
+| D8 Workaround | Yes | No | No |
+| Namespace Fix | No | No | Yes |
+
+### Unity 2022 D8 Workaround
+
+Unity 2022's AGP 7.4.2 ships a D8 dexer (R8 8.2.2-dev) that crashes with a `NullPointerException` when processing the EOS SDK's Java 11 class files. This affects 20 of the 35 classes in the AAR.
+
+The build processor applies a fully automatic workaround:
+
+1. **Empties the AAR's `classes.jar`** -- prevents the broken D8 from seeing the Java 11 classes
+2. **Copies pre-dexed classes to `libs/`** -- these were pre-compiled with Unity 6's working D8, and AGP passes `.dex` entries through without re-processing
+3. **Adds compile-only classes for javac** -- the original bytecode is available for compilation but excluded from dexing
+
+No user action is required. The workaround only activates on Unity 2022 and earlier.
+
+### Unity 6.1+ Namespace Fix
+
+AGP 8.x requires all Android library modules to declare a `namespace` in their build.gradle. Legacy `.androidlib` modules (like EOS resources) use the old format and lack this. The build processor auto-generates the namespace from AndroidManifest.xml.
+
 ## Common Build Errors
+
+### D8 NullPointerException (Unity 2022)
+
+```
+D8: java.lang.NullPointerException
+  at com.android.tools.r8.graph.u2.<init>
+```
+
+**Cause:** AGP 7.4.2's D8 dexer (R8 8.2.2-dev) crashes on Java 11 class files in the EOS SDK AAR. This only affects Unity 2022 and earlier.
+
+**Fix:** This is handled automatically by the build processor's D8 workaround. If you see this error, ensure you have `com.tront.eos-sdk` v1.5.0+ which includes the `eos-classes-predexed.jar` and `eos-classes-compile.jar` files. The build processor will detect Unity 2022 and apply the fix.
 
 ### FakeDependency.jar Transform Error
 
@@ -114,21 +155,29 @@ The Gradle template generator handles this automatically.
 
 ## Manual Gradle Setup
 
-If you prefer to configure Gradle manually instead of using the generator, here are the required changes.
+If you prefer to configure Gradle manually instead of using the generator, here are the required changes. The Java version and desugaring library version depend on your Unity version:
+
+| Unity Version | Java | desugar_jdk_libs |
+|---|---|---|
+| 2022.3 | VERSION_1_8 | 1.2.3 |
+| 6000.0 | VERSION_11 | 2.0.4 |
+| 6000.1+ | VERSION_17 | 2.1.4 |
+
+> **Note:** On Unity 2022, skip the `coreLibraryDesugaringEnabled` and `desugar_jdk_libs` lines entirely -- the build processor uses a pre-dexed workaround instead.
 
 ### mainTemplate.gradle
 
 ```groovy
 android {
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
-        coreLibraryDesugaringEnabled true
+        sourceCompatibility JavaVersion.VERSION_17  // see table above
+        targetCompatibility JavaVersion.VERSION_17  // see table above
+        coreLibraryDesugaringEnabled true            // skip on Unity 2022
     }
 }
 
 dependencies {
-    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'  // skip on Unity 2022
 }
 ```
 
@@ -137,14 +186,14 @@ dependencies {
 ```groovy
 android {
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
-        coreLibraryDesugaringEnabled true
+        sourceCompatibility JavaVersion.VERSION_17  // see table above
+        targetCompatibility JavaVersion.VERSION_17  // see table above
+        coreLibraryDesugaringEnabled true            // skip on Unity 2022
     }
 }
 
 dependencies {
-    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'  // skip on Unity 2022
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'androidx.core:core-ktx:1.12.0'
     implementation 'androidx.activity:activity:1.8.0'

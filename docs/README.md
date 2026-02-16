@@ -1,6 +1,6 @@
 # EOS SDK for Unity
 
-**v1.4.6** -- Lightweight Unity wrapper for the Epic Online Services (EOS) C# SDK v1.18.1.2.
+**v1.5.0** -- Lightweight Unity wrapper for the Epic Online Services (EOS) C# SDK v1.18.1.2.
 
 No PlayEveryWare dependency. No bloated plugin manager. Just the raw EOS SDK with thin convenience wrappers that get out of your way.
 
@@ -44,16 +44,16 @@ That's it. The SDK initializes, logs in with a DeviceID token, and all managers 
 
 Use the Setup Wizard (`Tools > EOS SDK > Setup Wizard`) to configure your own EOS Developer Portal credentials. Click **"Fill Sample Credentials"** for quick testing with public demo keys.
 
-## What's New in v1.4.6
+## What's New in v1.5.0
 
-- **Gradle Template Generator** -- one-click fix for the notorious `FakeDependency.jar` build error on Android
-- **Build Processor Robustness** -- compileOptions fallback, post-injection verification
-- **Pre-Build Validator** -- automatic warnings about Android config issues before you build
-- **Version Checker** -- `Tools > EOS SDK > Check for Updates`
+- **Unity 2022 Android builds** -- automatic D8 workaround for AGP 7.4.2's broken dexer (pre-dexed classes bypass the crash)
+- **Multi-version support** -- tested on Unity 2022.3, 6000.0, 6000.1, 6000.3 (all produce working APKs)
+- **VoIP init instrumentation** -- `[TIMING]` logs and `OnVoiceInitProgress` event for UI progress indicators
+- **Pre-query audio devices** -- voice devices cached at login so voice connects faster
 
 ## Requirements
 
-- Unity 6000.0+
+- Unity 2021.3+
 - Input System package (optional, for mobile Canvas UI)
 
 ## Architecture

@@ -132,6 +132,45 @@ namespace EOSNative.Editor
             }
         }
 
+        /// <summary>
+        /// Batch mode entry point — called via:
+        ///   Unity.exe -batchmode -executeMethod EOSNative.Editor.EOSBuildHelper.BatchBuild
+        ///     -outputPath Builds/game.apk -development
+        /// Reads -outputPath and -development from command line args.
+        /// Exits with code 0 on success, 1 on failure.
+        /// </summary>
+        public static void BatchBuild()
+        {
+            string outputPath = "";
+            bool development = false;
+
+            var args = System.Environment.GetCommandLineArgs();
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (args[i] == "-outputPath" && i + 1 < args.Length)
+                    outputPath = args[i + 1];
+                if (args[i] == "-development")
+                    development = true;
+            }
+
+            Debug.Log($"[EOS Build] BatchBuild: outputPath={outputPath}, development={development}");
+            string json = BuildAndroidHeadless(outputPath, development);
+            Debug.Log($"[EOS Build] Result: {json}");
+
+            // Write result to file for CLI tools to parse
+            string resultPath = Path.Combine(Application.dataPath, "..", "Builds", "build_result.json");
+            string resultDir = Path.GetDirectoryName(resultPath);
+            if (!string.IsNullOrEmpty(resultDir))
+                Directory.CreateDirectory(resultDir);
+            File.WriteAllText(resultPath, json);
+
+            // Exit with appropriate code
+            if (json.Contains("\"success\":true"))
+                EditorApplication.Exit(0);
+            else
+                EditorApplication.Exit(1);
+        }
+
         private static string[] GetEnabledScenes()
         {
             var scenes = new System.Collections.Generic.List<string>();
