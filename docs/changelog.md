@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.5.0
+
+- **VoIP init timing instrumentation** -- every voice init step now logs with `[TIMING]` tag showing elapsed milliseconds (`GetRTCRoomName`, `RegisterAudioNotifications`, `QueryAudioDevices`, auto-unmute callback)
+- **Pre-query audio devices at login** -- `PreQueryAudioDevices()` runs automatically on `EOSManager.OnLoginSuccess`, warming up the device cache so voice connects faster when joining a lobby
+- **`OnVoiceInitProgress` event** -- fires step-by-step messages during voice init (`"Getting room name..."`, `"Querying audio devices..."`, `"Voice ready!"`) for UI progress indicators
+- **Skip redundant device query** -- if devices were already pre-queried at login, the voice connect path skips `QueryAudioDevices()` entirely
+
 ## v1.4.6
 
 - **Gradle Template Generator** -- one-click fix for `FakeDependency.jar` errors on Android. Open `Tools > EOS SDK > Android Build Validator` and click "Generate EOS Gradle Templates".
