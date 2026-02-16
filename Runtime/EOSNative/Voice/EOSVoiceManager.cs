@@ -1,12 +1,14 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using Epic.OnlineServices;
 using Epic.OnlineServices.Lobby;
 using Epic.OnlineServices.RTC;
 using Epic.OnlineServices.RTCAudio;
 using EOSNative.Logging;
 using UnityEngine;
+using Debug = UnityEngine.Debug;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -79,6 +81,12 @@ namespace EOSNative.Voice
         /// Parameters: PUID string, RTCAudioStatus.
         /// </summary>
         public event Action<string, RTCAudioStatus> OnParticipantAudioStatusChanged;
+
+        /// <summary>
+        /// Fired during voice initialization with step-by-step progress messages.
+        /// Useful for showing init progress in UI ("Getting room name...", "Voice ready!").
+        /// </summary>
+        public event Action<string> OnVoiceInitProgress;
 
         #endregion
 
@@ -159,6 +167,10 @@ namespace EOSNative.Voice
         private string _micDeviceName;
         private readonly float[] _micSamples = new float[256];
 
+        // Timing instrumentation for voice init diagnostics
+        private readonly Stopwatch _initStopwatch = new();
+        private bool _audioDevicesPreQueried;
+
         private LobbyInterface Lobby => EOSManager.Instance?.LobbyInterface;
         private RTCInterface RTC => EOSManager.Instance?.RTCInterface;
         private RTCAudioInterface RTCAudio => EOSManager.Instance?.RTCAudioInterface;
@@ -182,6 +194,12 @@ namespace EOSNative.Voice
             if (transform.parent == null)
                 DontDestroyOnLoad(gameObject);
 
+            // Pre-query audio devices at login to warm up the cache before voice connects
+            if (EOSManager.Instance != null)
+            {
+                EOSManager.Instance.OnLoginSuccess += OnEOSLoginSuccess;
+            }
+
 #if UNITY_EDITOR
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
 #endif
@@ -189,6 +207,11 @@ namespace EOSNative.Voice
 
         private void OnDestroy()
         {
+            if (EOSManager.Instance != null)
+            {
+                EOSManager.Instance.OnLoginSuccess -= OnEOSLoginSuccess;
+            }
+
 #if UNITY_EDITOR
             EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
             if (!_isExitingPlayMode)
@@ -281,6 +304,63 @@ namespace EOSNative.Voice
 
         #endregion
 
+        #region Pre-Query Audio Devices
+
+        private void OnEOSLoginSuccess(ProductUserId puid)
+        {
+            PreQueryAudioDevices();
+        }
+
+        /// <summary>
+        /// Warm up the audio device cache at login time so devices are ready when voice connects.
+        /// Called automatically on <see cref="EOSManager.OnLoginSuccess"/>.
+        /// Can also be called manually.
+        /// </summary>
+        public void PreQueryAudioDevices()
+        {
+            if (_audioDevicesPreQueried) return;
+            if (RTCAudio == null)
+            {
+                Debug.Log("[EOSVoice] [TIMING] PreQueryAudioDevices: RTCAudio not available yet, skipping");
+                return;
+            }
+
+            _audioDevicesPreQueried = true;
+            var sw = Stopwatch.StartNew();
+            Debug.Log("[EOSVoice] [TIMING] PreQueryAudioDevices: Starting device enumeration at login...");
+
+            var inputOptions = new QueryInputDevicesInformationOptions();
+            RTCAudio.QueryInputDevicesInformation(ref inputOptions, null, (ref OnQueryInputDevicesInformationCallbackInfo data) =>
+            {
+                if (data.ResultCode == Result.Success)
+                {
+                    RefreshInputDeviceList();
+                    Debug.Log($"[EOSVoice] [TIMING] PreQueryAudioDevices: Input devices ready ({InputDevices.Count} found) in {sw.ElapsedMilliseconds}ms");
+                }
+                else
+                {
+                    Debug.LogWarning($"[EOSVoice] [TIMING] PreQueryAudioDevices: Input query failed: {data.ResultCode} in {sw.ElapsedMilliseconds}ms");
+                }
+            });
+
+            var outputOptions = new QueryOutputDevicesInformationOptions();
+            RTCAudio.QueryOutputDevicesInformation(ref outputOptions, null, (ref OnQueryOutputDevicesInformationCallbackInfo data) =>
+            {
+                if (data.ResultCode == Result.Success)
+                {
+                    RefreshOutputDeviceList();
+                    Debug.Log($"[EOSVoice] [TIMING] PreQueryAudioDevices: Output devices ready ({OutputDevices.Count} found) in {sw.ElapsedMilliseconds}ms");
+                }
+                else
+                {
+                    Debug.LogWarning($"[EOSVoice] [TIMING] PreQueryAudioDevices: Output query failed: {data.ResultCode} in {sw.ElapsedMilliseconds}ms");
+                }
+                AudioDevicesQueried = true;
+            });
+        }
+
+        #endregion
+
         #region Public API - Called by EOSLobbyManager
 
         /// <summary>
@@ -323,12 +403,23 @@ namespace EOSNative.Voice
             var result = Lobby.IsRTCRoomConnected(ref options, out bool isConnected);
             if (result == Result.Success && isConnected && !IsConnected)
             {
+                _initStopwatch.Restart();
                 EOSDebugLogger.Log(DebugCategory.VoiceManager, "EOSVoiceManager", "RTC already connected - initializing audio notifications");
+                Debug.Log("[EOSVoice] [TIMING] Voice init starting (already connected path)...");
                 IsConnected = true;
+                OnVoiceInitProgress?.Invoke("Getting room name...");
                 GetRTCRoomName();
+                Debug.Log($"[EOSVoice] [TIMING] GetRTCRoomName completed in {_initStopwatch.ElapsedMilliseconds}ms");
+                OnVoiceInitProgress?.Invoke("Registering audio notifications...");
                 RegisterAudioNotifications();
-                QueryAudioDevices();
+                Debug.Log($"[EOSVoice] [TIMING] RegisterAudioNotifications completed in {_initStopwatch.ElapsedMilliseconds}ms");
+                if (!AudioDevicesQueried)
+                {
+                    OnVoiceInitProgress?.Invoke("Querying audio devices...");
+                    QueryAudioDevices();
+                }
                 LogVoiceDiagnostics();
+                Debug.Log($"[EOSVoice] [TIMING] Voice init synchronous steps done in {_initStopwatch.ElapsedMilliseconds}ms");
                 OnVoiceConnectionChanged?.Invoke(true);
             }
         }
@@ -551,6 +642,7 @@ namespace EOSNative.Voice
             }
 
             // Query input devices
+            var queryStopwatch = Stopwatch.StartNew();
             var inputOptions = new QueryInputDevicesInformationOptions();
             RTCAudio.QueryInputDevicesInformation(ref inputOptions, null, (ref OnQueryInputDevicesInformationCallbackInfo data) =>
             {
@@ -558,7 +650,7 @@ namespace EOSNative.Voice
                 if (data.ResultCode == Result.Success)
                 {
                     RefreshInputDeviceList();
-                    Debug.Log($"[EOSVoice] Input devices: {InputDevices.Count}");
+                    Debug.Log($"[EOSVoice] [TIMING] Input devices: {InputDevices.Count} (queried in {queryStopwatch.ElapsedMilliseconds}ms)");
                     for (int i = 0; i < InputDevices.Count; i++)
                     {
                         var dev = InputDevices[i];
@@ -567,7 +659,7 @@ namespace EOSNative.Voice
                 }
                 else
                 {
-                    Debug.LogWarning($"[EOSVoice] QueryInputDevicesInformation failed: {data.ResultCode}");
+                    Debug.LogWarning($"[EOSVoice] [TIMING] QueryInputDevicesInformation failed: {data.ResultCode} (after {queryStopwatch.ElapsedMilliseconds}ms)");
                 }
             });
 
@@ -578,7 +670,7 @@ namespace EOSNative.Voice
                 if (data.ResultCode == Result.Success)
                 {
                     RefreshOutputDeviceList();
-                    Debug.Log($"[EOSVoice] Output devices: {OutputDevices.Count}");
+                    Debug.Log($"[EOSVoice] [TIMING] Output devices: {OutputDevices.Count} (queried in {queryStopwatch.ElapsedMilliseconds}ms)");
                     for (int i = 0; i < OutputDevices.Count; i++)
                     {
                         var dev = OutputDevices[i];
@@ -587,7 +679,7 @@ namespace EOSNative.Voice
                 }
                 else
                 {
-                    Debug.LogWarning($"[EOSVoice] QueryOutputDevicesInformation failed: {data.ResultCode}");
+                    Debug.LogWarning($"[EOSVoice] [TIMING] QueryOutputDevicesInformation failed: {data.ResultCode} (after {queryStopwatch.ElapsedMilliseconds}ms)");
                 }
             });
 
@@ -796,17 +888,36 @@ namespace EOSNative.Voice
 
             if (data.IsConnected)
             {
+                _initStopwatch.Restart();
+                Debug.Log("[EOSVoice] [TIMING] Voice init starting...");
+                OnVoiceInitProgress?.Invoke("Connecting to voice...");
+
                 // Get RTC room name from lobby
+                OnVoiceInitProgress?.Invoke("Getting room name...");
                 GetRTCRoomName();
+                Debug.Log($"[EOSVoice] [TIMING] GetRTCRoomName completed in {_initStopwatch.ElapsedMilliseconds}ms");
 
                 // Start listening for audio
+                OnVoiceInitProgress?.Invoke("Registering audio notifications...");
                 RegisterAudioNotifications();
+                Debug.Log($"[EOSVoice] [TIMING] RegisterAudioNotifications completed in {_initStopwatch.ElapsedMilliseconds}ms");
 
-                // Auto-discover audio devices on connect (previously required manual Refresh press)
-                QueryAudioDevices();
+                // Auto-discover audio devices on connect (skip if already pre-queried at login)
+                if (!AudioDevicesQueried)
+                {
+                    OnVoiceInitProgress?.Invoke("Querying audio devices...");
+                    QueryAudioDevices();
+                    Debug.Log($"[EOSVoice] [TIMING] QueryAudioDevices started at {_initStopwatch.ElapsedMilliseconds}ms (async — callbacks will log completion)");
+                }
+                else
+                {
+                    Debug.Log($"[EOSVoice] [TIMING] Audio devices already queried (pre-queried at login), skipping at {_initStopwatch.ElapsedMilliseconds}ms");
+                }
 
                 // Log diagnostic info for debugging Android voice issues
+                OnVoiceInitProgress?.Invoke("Running diagnostics...");
                 LogVoiceDiagnostics();
+                Debug.Log($"[EOSVoice] [TIMING] Voice init synchronous steps done in {_initStopwatch.ElapsedMilliseconds}ms (auto-unmute callback pending)");
             }
             else
             {
@@ -1038,12 +1149,23 @@ namespace EOSNative.Voice
                     RoomName = CurrentRoomName,
                     AudioStatus = RTCAudioStatus.Enabled
                 };
+                OnVoiceInitProgress?.Invoke("Auto-unmuting microphone...");
                 RTCAudio.UpdateSending(ref sendOptions, null, (ref UpdateSendingCallbackInfo cbData) =>
                 {
                     LastUpdateSendingResult = cbData.ResultCode;
                     LocalAudioStatus = cbData.AudioStatus;
                     IsMuted = (cbData.AudioStatus != RTCAudioStatus.Enabled);
-                    Debug.Log($"[EOSVoice] Auto-unmute result: {cbData.ResultCode}, AudioStatus={cbData.AudioStatus}");
+                    Debug.Log($"[EOSVoice] [TIMING] Auto-unmute result: {cbData.ResultCode}, AudioStatus={cbData.AudioStatus} at {_initStopwatch.ElapsedMilliseconds}ms");
+                    if (cbData.ResultCode == Result.Success)
+                    {
+                        OnVoiceInitProgress?.Invoke("Voice ready!");
+                        Debug.Log($"[EOSVoice] [TIMING] Voice fully initialized in {_initStopwatch.ElapsedMilliseconds}ms");
+                        _initStopwatch.Stop();
+                    }
+                    else
+                    {
+                        OnVoiceInitProgress?.Invoke($"Voice init issue: {cbData.AudioStatus}");
+                    }
                 });
             }
         }
@@ -1085,6 +1207,7 @@ namespace EOSNative.Voice
             LocalAudioStatus = RTCAudioStatus.Disabled;
             LastUpdateSendingResult = Result.NotConfigured;
             AudioDevicesQueried = false;
+            _audioDevicesPreQueried = false;
 
             EOSDebugLogger.Log(DebugCategory.VoiceManager, "EOSVoiceManager", "Cleaned up");
         }

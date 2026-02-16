@@ -1,6 +1,6 @@
 {
   "name": "com.tront.eos-sdk",
-  "version": "1.4.16",
+  "version": "1.5.0",
   "displayName": "EOS SDK",
   "description": "Epic Online Services (EOS) C# SDK v1.18.1.2 with lightweight Unity wrapper. Provides SDK initialization, lobbies, voice chat, friends, stats, leaderboards, achievements, cloud saves, and more. No networking framework — just clean EOS access.",
   "unity": "2021.3",
