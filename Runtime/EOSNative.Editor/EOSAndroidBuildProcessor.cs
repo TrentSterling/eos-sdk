@@ -329,6 +329,36 @@ namespace EOSNative.Editor
                 Debug.LogError($"[EOS-Native] VERIFICATION FAILED: {moduleName}/build.gradle is missing desugar_jdk_libs dependency after injection! " +
                                "Fix: Use custom gradle templates (Tools > EOS SDK > Android Build Validator > Generate EOS Gradle Templates).");
             }
+
+            // Disable lint release build checks to work around R8/D8 crash in generateReleaseLintModel.
+            // AGP 8.x has a known bug where D8BackportedMethodsGenerator crashes with NPE on
+            // FakeDependency.jar when core library desugaring is enabled. The actual APK compilation
+            // works fine — only the lint analysis task crashes. checkReleaseBuilds=false skips it.
+            if (!verification.Contains("checkReleaseBuilds"))
+            {
+                string lintFix = verification;
+                // Try to inject into existing lint block
+                if (Regex.IsMatch(lintFix, @"lint\s*\{"))
+                {
+                    lintFix = Regex.Replace(lintFix, @"(lint\s*\{)", "$1\n        checkReleaseBuilds = false");
+                }
+                else if (Regex.IsMatch(lintFix, @"lintOptions\s*\{"))
+                {
+                    lintFix = Regex.Replace(lintFix, @"(lintOptions\s*\{)", "$1\n        checkReleaseBuilds false");
+                }
+                else if (Regex.IsMatch(lintFix, @"android\s*\{"))
+                {
+                    // No lint block at all — create one
+                    lintFix = Regex.Replace(lintFix, @"(android\s*\{)", "$1\n    lint {\n        checkReleaseBuilds = false\n    }");
+                }
+
+                if (lintFix != verification)
+                {
+                    File.WriteAllText(gradlePath, lintFix);
+                    Debug.Log($"[EOS-Native] Disabled lint checkReleaseBuilds in {moduleName}/build.gradle " +
+                              "(workaround for R8 D8BackportedMethodsGenerator NPE crash)");
+                }
+            }
         }
 
         private static void FixAndroidLibNamespaces(string unityLibPath)
