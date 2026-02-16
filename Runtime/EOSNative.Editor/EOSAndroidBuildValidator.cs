@@ -886,7 +886,7 @@ namespace EOSNative.Editor
 
             // Custom keystore is enabled — validate it's actually configured
             string keystorePath = PlayerSettings.Android.keystoreName;
-            string keyAlias = PlayerSettings.Android.keyAliasName;
+            string keyAlias = PlayerSettings.Android.keyaliasName;
             var issues = new List<string>();
 
             if (string.IsNullOrEmpty(keystorePath))

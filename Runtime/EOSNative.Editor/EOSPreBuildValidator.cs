@@ -74,7 +74,7 @@ namespace EOSNative.Editor
             if (PlayerSettings.Android.useCustomKeystore)
             {
                 string keystorePath = PlayerSettings.Android.keystoreName;
-                string keyAlias = PlayerSettings.Android.keyAliasName;
+                string keyAlias = PlayerSettings.Android.keyaliasName;
                 if (string.IsNullOrEmpty(keystorePath) || !File.Exists(keystorePath) || string.IsNullOrEmpty(keyAlias))
                 {
                     Debug.LogError("[EOS-Native] PRE-BUILD: Custom Keystore is enabled but not properly configured! " +
