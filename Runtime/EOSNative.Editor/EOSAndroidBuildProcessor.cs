@@ -171,7 +171,7 @@ namespace EOSNative.Editor
                 if (drmMatch.Success)
                 {
                     string afterRepos = content.Substring(drmMatch.Index + drmMatch.Length);
-                    if (!afterRepos.Substring(0, Math.Min(afterRepos.Length, 500)).Contains("google()"))
+                    if (!afterRepos.Substring(0, System.Math.Min(afterRepos.Length, 500)).Contains("google()"))
                     {
                         content = content.Substring(0, drmMatch.Index + drmMatch.Length) +
                                   "\n        google()\n        mavenCentral()" +
@@ -200,7 +200,7 @@ namespace EOSNative.Editor
                 if (pmMatch.Success)
                 {
                     string afterRepos = content.Substring(pmMatch.Index + pmMatch.Length);
-                    if (!afterRepos.Substring(0, Math.Min(afterRepos.Length, 500)).Contains("google()"))
+                    if (!afterRepos.Substring(0, System.Math.Min(afterRepos.Length, 500)).Contains("google()"))
                     {
                         content = content.Substring(0, pmMatch.Index + pmMatch.Length) +
                                   "\n        google()\n        mavenCentral()" +
