@@ -104,7 +104,12 @@ namespace EOSNative.Editor
                 }
             }
 
-            // 1. Enable core library desugaring in both modules
+            // 1. Ensure settings.gradle has google() + mavenCentral() repos.
+            // AGP 8.x (Unity 6.1+) uses PREFER_SETTINGS mode — module-level repos are ignored,
+            // so desugar_jdk_libs and AndroidX deps must be resolvable from settings-level repos.
+            EnsureSettingsRepositories(gradleRoot);
+
+            // 2. Enable core library desugaring in both modules
             if (File.Exists(launcherGradle))
                 InjectDesugaring(launcherGradle, "launcher");
             else
@@ -115,29 +120,102 @@ namespace EOSNative.Editor
             else
                 Debug.LogWarning($"[EOS-Native] unityLibrary/build.gradle not found at: {unityLibGradle}");
 
-            // 2. Fix .androidlib modules missing namespace (AGP 8.x / Unity 6.1+ requirement)
+            // 3. Fix .androidlib modules missing namespace (AGP 8.x / Unity 6.1+ requirement)
             FixAndroidLibNamespaces(path);
 
-            // 3. Ensure native libs are extracted from AARs (required for EOS SDK .so loading)
+            // 4. Ensure native libs are extracted from AARs (required for EOS SDK .so loading)
             InjectExtractNativeLibs(path);
 
-            // 4. Inject eos_login_protocol_scheme string resource
+            // 5. Inject eos_login_protocol_scheme string resource
             InjectEosLoginScheme(path);
 
-            // 5. Generate Java helper that calls System.loadLibrary("EOSSDK") from Java classloader context.
+            // 6. Generate Java helper that calls System.loadLibrary("EOSSDK") from Java classloader context.
             // This is CRITICAL: when System.loadLibrary is called from Java code compiled into the APK,
             // JNI_OnLoad's FindClass uses the caller's (app) classloader, so RegisterNatives succeeds
             // for EOSLogger and other native methods. Without this, dlopen from P/Invoke uses the
             // system classloader, which can't find app classes → UnsatisfiedLinkError.
             InjectJavaInitHelper(path);
 
-            // 6. Inject required permissions for EOS features (voice, networking)
+            // 7. Inject required permissions for EOS features (voice, networking)
             InjectPermissions(path);
 
-            // 7. Inject ProGuard keep rules for EOS SDK Java classes (prevents R8 stripping)
+            // 8. Inject ProGuard keep rules for EOS SDK Java classes (prevents R8 stripping)
             InjectProguardRules(path);
 
             Debug.Log("[EOS-Native] Build processor complete. All Android configurations injected.");
+        }
+
+        private static void EnsureSettingsRepositories(string gradleRoot)
+        {
+            // AGP 8.x (Unity 6.1+) uses repositoriesMode PREFER_SETTINGS, which means
+            // module-level repository blocks are ignored. All dependencies (including
+            // coreLibraryDesugaring desugar_jdk_libs and AndroidX) must be resolvable from
+            // the settings.gradle dependencyResolutionManagement repositories.
+            //
+            // Without google() + mavenCentral() here, you get:
+            // "Could not resolve all files for configuration ':unityLibrary:detachedConfiguration3'"
+            string settingsPath = Path.Combine(gradleRoot, "settings.gradle");
+            if (!File.Exists(settingsPath))
+                return;
+
+            string content = File.ReadAllText(settingsPath);
+            bool modified = false;
+
+            // Check if dependencyResolutionManagement block exists with repositories
+            if (content.Contains("dependencyResolutionManagement"))
+            {
+                // Ensure google() is in the dependencyResolutionManagement repositories
+                // Look for the repositories block inside dependencyResolutionManagement
+                var drmMatch = Regex.Match(content,
+                    @"(dependencyResolutionManagement\s*\{[\s\S]*?repositories\s*\{)", RegexOptions.Multiline);
+                if (drmMatch.Success)
+                {
+                    string afterRepos = content.Substring(drmMatch.Index + drmMatch.Length);
+                    if (!afterRepos.Substring(0, Math.Min(afterRepos.Length, 500)).Contains("google()"))
+                    {
+                        content = content.Substring(0, drmMatch.Index + drmMatch.Length) +
+                                  "\n        google()\n        mavenCentral()" +
+                                  content.Substring(drmMatch.Index + drmMatch.Length);
+                        modified = true;
+                    }
+                }
+            }
+            else
+            {
+                // No dependencyResolutionManagement at all — append one
+                content += "\ndependencyResolutionManagement {\n" +
+                           "    repositories {\n" +
+                           "        google()\n" +
+                           "        mavenCentral()\n" +
+                           "    }\n" +
+                           "}\n";
+                modified = true;
+            }
+
+            // Also ensure pluginManagement has google() for AGP plugin resolution
+            if (content.Contains("pluginManagement"))
+            {
+                var pmMatch = Regex.Match(content,
+                    @"(pluginManagement\s*\{[\s\S]*?repositories\s*\{)", RegexOptions.Multiline);
+                if (pmMatch.Success)
+                {
+                    string afterRepos = content.Substring(pmMatch.Index + pmMatch.Length);
+                    if (!afterRepos.Substring(0, Math.Min(afterRepos.Length, 500)).Contains("google()"))
+                    {
+                        content = content.Substring(0, pmMatch.Index + pmMatch.Length) +
+                                  "\n        google()\n        mavenCentral()" +
+                                  content.Substring(pmMatch.Index + pmMatch.Length);
+                        modified = true;
+                    }
+                }
+            }
+
+            if (modified)
+            {
+                File.WriteAllText(settingsPath, content);
+                Debug.Log("[EOS-Native] Ensured google() + mavenCentral() repos in settings.gradle " +
+                          "(required for AGP 8.x PREFER_SETTINGS dependency resolution)");
+            }
         }
 
         private static void InjectDesugaring(string gradlePath, string moduleName)
