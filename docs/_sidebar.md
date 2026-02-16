@@ -3,7 +3,7 @@
 - [Configuration](configuration.md)
 - [Lobbies](lobbies.md)
 - [Voice Chat](voice-chat.md)
-- [Android / Quest Builds](android-builds.md)
+- [Android / Quest Builds](android-builds.md "Unity 2022-6000.3 supported")
 - [Troubleshooting](troubleshooting.md)
 - [Changelog](changelog.md)
 - **Links**

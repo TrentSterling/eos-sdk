@@ -2,6 +2,9 @@
 
 ## v1.5.0
 
+- **Unity 2022 Android build fix** -- AGP 7.4.2's D8 dexer crashes on Java 11 class files in the EOS AAR (NullPointerException on NestHost/NestMembers attributes and `$values()` enum pattern). The build processor now auto-applies a 3-part workaround: empties the AAR's classes.jar, includes pre-dexed classes (built with Unity 6's D8), and adds a compile-only JAR for javac resolution. Fully automatic, no user action needed.
+- **Multi-version Android support** -- build processor adapts Gradle config per Unity version (Java 8/11/17, desugar_jdk_libs 1.2.3/2.0.4/2.1.4, D8 workaround on/off). Tested and working on Unity 2022.3, 6000.0, 6000.1, and 6000.3.
+- **Minimum Unity version lowered** -- now supports Unity 2021.3+ (previously required Unity 6000.0+)
 - **VoIP init timing instrumentation** -- every voice init step now logs with `[TIMING]` tag showing elapsed milliseconds (`GetRTCRoomName`, `RegisterAudioNotifications`, `QueryAudioDevices`, auto-unmute callback)
 - **Pre-query audio devices at login** -- `PreQueryAudioDevices()` runs automatically on `EOSManager.OnLoginSuccess`, warming up the device cache so voice connects faster when joining a lobby
 - **`OnVoiceInitProgress` event** -- fires step-by-step messages during voice init (`"Getting room name..."`, `"Querying audio devices..."`, `"Voice ready!"`) for UI progress indicators
