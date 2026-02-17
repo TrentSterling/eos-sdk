@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.6.2
+
+- **Fix** -- Exclude full lobbies filter now works reliably. The search was client-side filtering with a server-side limit of 10 results, meaning full lobbies consumed result slots. Now over-fetches from EOS (3x or 50 minimum) when client-side filters are active, then caps to the requested `MaxResults`.
+- **Fix** -- `LeaveLobbyAsync` cleanup ordering. Notifications are now unsubscribed and state cleared BEFORE the EOS leave call (was after). Prevents stale notifications from triggering during the leave sequence, which caused race conditions during host migration.
+- **Fix** -- `LeaveLobbySync` now fires `OnLobbyLeft` event so FishNet and other subscribers get notified on sync leave (was missing).
+- **Fix** -- `GetLobbyDataAsync` retry loop reduced from 7.5s worst case (15 iters, 500ms cap) to 1.75s (10 iters, 250ms cap, check-first). Directly speeds up host migration.
+- **Ghost lobby defense** -- Added `LobbyData.IsGhost` property. Ghost checks added to `JoinLobbyByIdAsync` (auto-leave), `SearchByLobbyIdAsync`, `SearchByMemberAsync`, `FindFriendLobbiesAsync`, and `ProcessSearchResults`.
+
 ## v1.6.1
 
 - **Batch attribute setting** -- `SetLobbyAttributesBatchAsync` sets all lobby attributes in a single EOS modification (atomic, 1 round trip instead of N individual calls). `CreateLobbyAsync` now uses this internally for join code, migration support, and all custom attributes.
