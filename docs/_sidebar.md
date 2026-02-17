@@ -1,6 +1,8 @@
 - [Home](/)
 - [Installation](installation.md)
 - [Configuration](configuration.md)
+- [Authentication](auth.md)
+- [Security](security.md)
 - [Lobbies](lobbies.md)
 - [Voice Chat](voice-chat.md)
 - [Android / Quest Builds](android-builds.md "Unity 2022-6000.3 supported")
