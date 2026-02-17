@@ -175,9 +175,19 @@ Lobby attributes are public key-value pairs visible to all members and searchabl
 ### Setting Lobby Attributes (Owner Only)
 
 ```csharp
+// Set a single attribute
 await lobbyManager.SetLobbyAttributeAsync(lobby.LobbyId, "MAP", "arena_02");
-await lobbyManager.SetLobbyAttributeAsync(lobby.LobbyId, "IN_PROGRESS", "true");
+
+// Set multiple attributes atomically (1 round trip)
+await lobbyManager.SetLobbyAttributesBatchAsync(lobby.LobbyId, new Dictionary<string, string>
+{
+    { "MAP", "arena_02" },
+    { "IN_PROGRESS", "true" },
+    { "ROUND", "3" }
+});
 ```
+
+> `CreateLobbyAsync` uses `SetLobbyAttributesBatchAsync` internally — all lobby attributes (join code, migration support, custom attributes) are set in a single atomic modification.
 
 ### Standard Attribute Keys
 

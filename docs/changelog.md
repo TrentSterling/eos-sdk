@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.6.1
+
+- **Batch attribute setting** -- `SetLobbyAttributesBatchAsync` sets all lobby attributes in a single EOS modification (atomic, 1 round trip instead of N individual calls). `CreateLobbyAsync` now uses this internally for join code, migration support, and all custom attributes.
+- **Fix** -- `OnLobbyCreated` → `OnLobbyJoined` in `CreateLobbyAsync`. Voice init was calling the wrong method, which could cause the host to miss the RTC room connection on some timing paths.
+- **Search debug logging** -- lobby searches now log all search parameters, raw EOS result count vs post-filter count, and per-lobby attribute summaries. Makes it much easier to diagnose "why didn't my search find anything?" issues.
+
+## v1.6.0
+
+- **Auto-leave before create** -- if the player is already in a lobby when `CreateLobbyAsync` is called, the old lobby is left automatically before creating the new one, preventing `LimitExceeded` errors
+- **LimitExceeded retry** -- if `CreateLobby` returns `LimitExceeded`, automatically leaves any current lobby and retries once
+
 ## v1.5.0
 
 - **Unity 2022 Android build fix** -- AGP 7.4.2's D8 dexer crashes on Java 11 class files in the EOS AAR (NullPointerException on NestHost/NestMembers attributes and `$values()` enum pattern). The build processor now auto-applies a 3-part workaround: empties the AAR's classes.jar, includes pre-dexed classes (built with Unity 6's D8), and adds a compile-only JAR for javac resolution. Fully automatic, no user action needed.
