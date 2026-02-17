@@ -369,8 +369,16 @@ namespace EOSNative.Lobbies
                 return (Result.NotConfigured, null);
             }
 
+            // Over-fetch from EOS when client-side filters are active.
+            // EOS returns up to MaxResults lobbies, then we filter client-side.
+            // Without over-fetching, a 10-result query where 8 are full yields only 2 results
+            // even though more non-full lobbies exist beyond the first 10.
+            uint eosMaxResults = options.MaxResults;
+            if (options.OnlyAvailable || options.ExcludePasswordProtected || options.ExcludeInProgress)
+                eosMaxResults = Math.Max(options.MaxResults * 3, 50);
+
             // Create search handle
-            var createSearchOptions = new CreateLobbySearchOptions { MaxResults = options.MaxResults };
+            var createSearchOptions = new CreateLobbySearchOptions { MaxResults = eosMaxResults };
             var createResult = LobbyInterface.CreateLobbySearch(ref createSearchOptions, out LobbySearch searchHandle);
 
             if (createResult != Result.Success)
@@ -515,8 +523,12 @@ namespace EOSNative.Lobbies
             var lobbies = ProcessSearchResults(searchHandle, options);
             searchHandle.Release();
 
+            // Cap to user-requested MaxResults (we may have over-fetched from EOS)
+            if (lobbies.Count > (int)options.MaxResults)
+                lobbies = lobbies.GetRange(0, (int)options.MaxResults);
+
             // Log summary with each lobby's attributes
-            Debug.Log($"[EOSLobbyManager] Search result: {result.ResultCode}, EOS returned {rawCount} raw, {lobbies.Count} after filtering");
+            Debug.Log($"[EOSLobbyManager] Search result: {result.ResultCode}, EOS returned {rawCount} raw, {lobbies.Count} after filtering (max {options.MaxResults})");
             foreach (var lobby in lobbies)
             {
                 var attrSummary = lobby.Attributes != null && lobby.Attributes.Count > 0
@@ -608,6 +620,14 @@ namespace EOSNative.Lobbies
             var lobbyData = ExtractLobbyData(details);
             details.Release();
             searchHandle.Release();
+
+            // Reject ghost lobbies
+            if (lobbyData.IsGhost)
+            {
+                EOSDebugLogger.Log(DebugCategory.LobbyManager, "EOSLobbyManager",
+                    $" SearchByLobbyId: Rejecting ghost lobby {lobbyId} (Members:{lobbyData.MemberCount}, Owner:{lobbyData.OwnerPuid ?? "null"})");
+                return (Result.NotFound, null);
+            }
 
             EOSDebugLogger.Log(DebugCategory.LobbyManager, "EOSLobbyManager", $" SearchByLobbyId found: {lobbyData}");
             return (Result.Success, lobbyData);
@@ -712,8 +732,13 @@ namespace EOSNative.Lobbies
                 if (copyResult == Result.Success && details != null)
                 {
                     var lobbyData = ExtractLobbyData(details);
-                    lobbies.Add(lobbyData);
                     details.Release();
+
+                    // Skip ghost lobbies
+                    if (lobbyData.IsGhost)
+                        continue;
+
+                    lobbies.Add(lobbyData);
                 }
             }
 
@@ -738,8 +763,8 @@ namespace EOSNative.Lobbies
                 return (result, lobbies);
             }
 
-            // Filter to only joinable lobbies (not full, not in progress)
-            var joinable = lobbies.FindAll(l => l.AvailableSlots > 0 && !l.IsInProgress);
+            // Filter to only joinable lobbies (not ghost, not full, not in progress)
+            var joinable = lobbies.FindAll(l => !l.IsGhost && l.AvailableSlots > 0 && !l.IsInProgress);
             return (Result.Success, joinable);
         }
 
@@ -1008,9 +1033,23 @@ namespace EOSNative.Lobbies
 
             // Get updated lobby data
             var lobbyData = await GetLobbyDataAsync(lobbyId);
-            CurrentLobby = lobbyData;
 
             details?.Release();
+
+            // Post-join ghost detection — if the lobby is empty/ownerless, auto-leave immediately
+            if (lobbyData.IsGhost)
+            {
+                Debug.LogWarning($"[EOSLobbyManager] Joined ghost lobby {lobbyId} (Members:{lobbyData.MemberCount}, Owner:{lobbyData.OwnerPuid ?? "null"}) — auto-leaving");
+                var autoLeaveOptions = new LeaveLobbyOptions
+                {
+                    LocalUserId = LocalProductUserId,
+                    LobbyId = lobbyId
+                };
+                LobbyInterface.LeaveLobby(ref autoLeaveOptions, null, (ref LeaveLobbyCallbackInfo _) => { });
+                return (Result.NotFound, default);
+            }
+
+            CurrentLobby = lobbyData;
 
             // Subscribe to notifications
             SubscribeToNotifications(lobbyId);
@@ -1076,6 +1115,9 @@ namespace EOSNative.Lobbies
             CurrentLobby = default;
 
             EOSDebugLogger.Log(DebugCategory.LobbyManager, "EOSLobbyManager", "Left lobby (sync)");
+
+            // Fire OnLobbyLeft so subscribers (FishNet, P2P, NetworkManager, etc.) can clean up
+            OnLobbyLeft?.Invoke();
         }
 
         /// <summary>
@@ -1098,6 +1140,18 @@ namespace EOSNative.Lobbies
 
             string lobbyId = CurrentLobby.LobbyId;
 
+            // Unsubscribe BEFORE the EOS leave call.
+            // If we leave first, stale notifications (OnMemberStatusReceived, OnOwnerChanged)
+            // can fire while we're still subscribed, causing race conditions during host migration.
+            UnsubscribeFromNotifications();
+
+            // Notify voice manager
+            EOSVoiceManager.Instance?.OnLobbyLeft();
+
+            // Clear current lobby BEFORE the async EOS call
+            CurrentLobby = default;
+
+            // Now send the EOS leave (any queued notifications are already unsubscribed)
             var leaveOptions = new LeaveLobbyOptions
             {
                 LocalUserId = LocalProductUserId,
@@ -1111,15 +1165,6 @@ namespace EOSNative.Lobbies
             });
 
             var result = await tcs.Task;
-
-            // Unsubscribe from notifications
-            UnsubscribeFromNotifications();
-
-            // Notify voice manager
-            EOSVoiceManager.Instance?.OnLobbyLeft();
-
-            // Clear current lobby
-            CurrentLobby = default;
 
             if (result.ResultCode != Result.Success && result.ResultCode != Result.NotFound)
             {
@@ -1436,8 +1481,8 @@ namespace EOSNative.Lobbies
                         continue;
                     }
 
-                    // Filter out empty lobbies (ghost lobbies)
-                    if (lobbyData.MemberCount == 0)
+                    // Filter out ghost lobbies (0 members or no owner)
+                    if (lobbyData.IsGhost)
                     {
                         details.Release();
                         continue;
@@ -1545,10 +1590,12 @@ namespace EOSNative.Lobbies
 
             // Retry with backoff — EOS SDK local cache may not be populated immediately after join
             // We need both: the details handle AND the owner info to be available
+            // Check-first pattern: attempt immediately, then delay (worst case ~1.75s vs old 7.5s)
             LobbyData lobbyData = default;
-            for (int i = 0; i < 15; i++)
+            for (int i = 0; i < 10; i++)
             {
-                await Task.Delay(100 * Math.Min(i + 1, 5)); // 100, 200, 300, 400, 500, 500, ...
+                if (i > 0)
+                    await Task.Delay(50 * Math.Min(i, 5)); // 0, 50, 100, 150, 200, 250, 250, ...
 
                 var result = LobbyInterface.CopyLobbyDetailsHandle(ref options, out LobbyDetails details);
                 if (result != Result.Success || details == null)
