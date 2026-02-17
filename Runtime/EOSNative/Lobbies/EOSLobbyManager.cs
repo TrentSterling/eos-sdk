@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Epic.OnlineServices;
 using Epic.OnlineServices.Lobby;
@@ -277,28 +278,20 @@ namespace EOSNative.Lobbies
             string lobbyId = createResult.LobbyId;
             EOSDebugLogger.Log(DebugCategory.LobbyManager, "EOSLobbyManager", $" Lobby created: {lobbyId}");
 
-            // Set the join code attribute
-            var setCodeResult = await SetLobbyAttributeAsync(lobbyId, LobbyAttributes.JOIN_CODE, joinCode);
-            if (setCodeResult != Result.Success)
-            {
-                Debug.LogWarning($"[EOSLobbyManager] Failed to set join code attribute: {setCodeResult}");
-            }
-
-            // Set migration support attribute
-            if (options.AllowHostMigration)
-            {
-                await SetLobbyAttributeAsync(lobbyId, LobbyAttributes.MIGRATION_SUPPORT, "true");
-            }
-
-            // Set all attributes (includes convenience properties + custom attributes)
+            // Set ALL attributes in a single modification (atomic, 1 round trip instead of N)
             var allAttributes = options.BuildAttributes();
-            foreach (var kvp in allAttributes)
+            allAttributes[LobbyAttributes.JOIN_CODE] = joinCode;
+            if (options.AllowHostMigration)
+                allAttributes[LobbyAttributes.MIGRATION_SUPPORT] = "true";
+
+            var setAttrsResult = await SetLobbyAttributesBatchAsync(lobbyId, allAttributes);
+            if (setAttrsResult != Result.Success)
             {
-                var attrResult = await SetLobbyAttributeAsync(lobbyId, kvp.Key, kvp.Value);
-                if (attrResult != Result.Success)
-                {
-                    Debug.LogWarning($"[EOSLobbyManager] Failed to set attribute {kvp.Key}: {attrResult}");
-                }
+                Debug.LogWarning($"[EOSLobbyManager] Failed to set lobby attributes: {setAttrsResult}");
+            }
+            else
+            {
+                Debug.Log($"[EOSLobbyManager] Set {allAttributes.Count} attributes on lobby {lobbyId}: {string.Join(", ", allAttributes.Select(kv => $"{kv.Key}={kv.Value}"))}");
             }
 
             // Get lobby details and cache
@@ -312,7 +305,7 @@ namespace EOSNative.Lobbies
             // Notify voice manager if voice is enabled
             if (enableVoice)
             {
-                EOSVoiceManager.Instance?.OnLobbyCreated(lobbyId);
+                EOSVoiceManager.Instance?.OnLobbyJoined(lobbyId);
             }
 
             EOSDebugLogger.Log(DebugCategory.LobbyManager, "EOSLobbyManager", $" Lobby ready with code: {joinCode}");
@@ -386,6 +379,9 @@ namespace EOSNative.Lobbies
                 return (createResult, null);
             }
 
+            // Track parameters for debug logging
+            var searchParams = new List<string>();
+
             // Set search parameters
             if (!string.IsNullOrEmpty(options.JoinCode))
             {
@@ -400,6 +396,7 @@ namespace EOSNative.Lobbies
                     }
                 };
                 var paramResult = searchHandle.SetParameter(ref paramOptions);
+                searchParams.Add($"JOIN_CODE == '{options.JoinCode}' ({paramResult})");
                 if (paramResult != Result.Success)
                 {
                     Debug.LogWarning($"[EOSLobbyManager] Failed to set JOIN_CODE parameter: {paramResult}");
@@ -408,7 +405,6 @@ namespace EOSNative.Lobbies
             else
             {
                 // No specific join code - search for all lobbies with a non-empty JOIN_CODE
-                // This pattern comes from FishyEOS samples: use Notequal with empty string
                 var paramOptions = new LobbySearchSetParameterOptions
                 {
                     ComparisonOp = ComparisonOp.Notequal,
@@ -419,10 +415,10 @@ namespace EOSNative.Lobbies
                     }
                 };
                 var paramResult = searchHandle.SetParameter(ref paramOptions);
+                searchParams.Add($"JOIN_CODE != '' ({paramResult})");
                 if (paramResult != Result.Success)
                 {
                     Debug.LogWarning($"[EOSLobbyManager] Failed to set search parameter: {paramResult}");
-                    // Continue anyway - search may still work without this filter
                 }
             }
 
@@ -439,6 +435,7 @@ namespace EOSNative.Lobbies
                     }
                 };
                 var bucketResult = searchHandle.SetParameter(ref bucketParam);
+                searchParams.Add($"bucket == '{options.BucketId}' ({bucketResult})");
                 if (bucketResult != Result.Success)
                 {
                     Debug.LogWarning($"[EOSLobbyManager] Failed to set bucket parameter: {bucketResult}");
@@ -460,6 +457,7 @@ namespace EOSNative.Lobbies
                         }
                     };
                     var filterResult = searchHandle.SetParameter(ref filterParam);
+                    searchParams.Add($"{kvp.Key} == '{kvp.Value}' ({filterResult})");
                     if (filterResult != Result.Success)
                     {
                         Debug.LogWarning($"[EOSLobbyManager] Failed to set filter '{kvp.Key}': {filterResult}");
@@ -482,12 +480,15 @@ namespace EOSNative.Lobbies
                         }
                     };
                     var filterResult = searchHandle.SetParameter(ref filterParam);
+                    searchParams.Add($"{filter.Key} {filter.Comparison} '{filter.Value}' ({filterResult})");
                     if (filterResult != Result.Success)
                     {
                         Debug.LogWarning($"[EOSLobbyManager] Failed to set filter '{filter}': {filterResult}");
                     }
                 }
             }
+
+            Debug.Log($"[EOSLobbyManager] Search params ({searchParams.Count}): {string.Join(" AND ", searchParams)}");
 
             // Execute search
             var findOptions = new LobbySearchFindOptions { LocalUserId = LocalProductUserId };
@@ -506,11 +507,24 @@ namespace EOSNative.Lobbies
                 return (result.ResultCode, null);
             }
 
-            // Process results
+            // Log raw EOS result count before client-side filtering
+            var rawCountOptions = new LobbySearchGetSearchResultCountOptions();
+            uint rawCount = searchHandle.GetSearchResultCount(ref rawCountOptions);
+
+            // Process results (applies client-side filters)
             var lobbies = ProcessSearchResults(searchHandle, options);
             searchHandle.Release();
 
-            EOSDebugLogger.Log(DebugCategory.LobbyManager, "EOSLobbyManager", $" Found {lobbies.Count} lobbies");
+            // Log summary with each lobby's attributes
+            Debug.Log($"[EOSLobbyManager] Search result: {result.ResultCode}, EOS returned {rawCount} raw, {lobbies.Count} after filtering");
+            foreach (var lobby in lobbies)
+            {
+                var attrSummary = lobby.Attributes != null && lobby.Attributes.Count > 0
+                    ? string.Join(", ", lobby.Attributes.Select(kv => $"{kv.Key}={kv.Value}"))
+                    : "(no attributes)";
+                Debug.Log($"[EOSLobbyManager]   Lobby {lobby.JoinCode ?? lobby.LobbyId}: owner={lobby.OwnerPuid}, members={lobby.MemberCount}/{lobby.MaxMembers}, attrs=[{attrSummary}]");
+            }
+
             return (Result.Success, lobbies);
         }
 
@@ -1200,6 +1214,62 @@ namespace EOSNative.Lobbies
                 Debug.LogError($"[EOSLobbyManager] Failed to add attribute: {addResult}");
                 modification.Release();
                 return addResult;
+            }
+
+            var updateOptions = new UpdateLobbyOptions { LobbyModificationHandle = modification };
+            var tcs = new TaskCompletionSource<UpdateLobbyCallbackInfo>();
+            LobbyInterface.UpdateLobby(ref updateOptions, null, (ref UpdateLobbyCallbackInfo data) =>
+            {
+                tcs.SetResult(data);
+            });
+
+            var result = await tcs.Task;
+            modification.Release();
+
+            return result.ResultCode;
+        }
+
+        /// <summary>
+        /// Sets multiple lobby attributes in a single modification (1 round trip).
+        /// All attributes are set atomically — no window where lobby is partially configured.
+        /// </summary>
+        public async Task<Result> SetLobbyAttributesBatchAsync(string lobbyId, Dictionary<string, string> attributes)
+        {
+            if (attributes == null || attributes.Count == 0)
+                return Result.Success;
+
+            var modifyOptions = new UpdateLobbyModificationOptions
+            {
+                LocalUserId = LocalProductUserId,
+                LobbyId = lobbyId
+            };
+
+            var modifyResult = LobbyInterface.UpdateLobbyModification(ref modifyOptions, out LobbyModification modification);
+            if (modifyResult != Result.Success)
+            {
+                Debug.LogError($"[EOSLobbyManager] Failed to create modification for batch: {modifyResult}");
+                return modifyResult;
+            }
+
+            foreach (var kvp in attributes)
+            {
+                var addAttrOptions = new LobbyModificationAddAttributeOptions
+                {
+                    Attribute = new AttributeData
+                    {
+                        Key = kvp.Key,
+                        Value = new AttributeDataValue { AsUtf8 = kvp.Value }
+                    },
+                    Visibility = LobbyAttributeVisibility.Public
+                };
+
+                var addResult = modification.AddAttribute(ref addAttrOptions);
+                if (addResult != Result.Success)
+                {
+                    Debug.LogError($"[EOSLobbyManager] Failed to add attribute '{kvp.Key}' to batch: {addResult}");
+                    modification.Release();
+                    return addResult;
+                }
             }
 
             var updateOptions = new UpdateLobbyOptions { LobbyModificationHandle = modification };
