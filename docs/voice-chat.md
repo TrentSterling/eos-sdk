@@ -52,9 +52,31 @@ string room = voice.CurrentRoomName;   // RTC room name
 ```csharp
 // Set volume for a specific player (0-100, 50 = normal)
 voice.SetParticipantVolume(playerPuid, 75f);
+```
 
-// Mute a specific player locally (only affects your playback)
+### Local Muting
+
+Mute a specific player locally (only affects your playback — they can still hear you):
+
+```csharp
+// Mute a player
 voice.SetParticipantMuted(playerPuid, true);
+
+// Unmute them
+voice.SetParticipantMuted(playerPuid, false);
+
+// Check if you've muted a specific player
+bool muted = voice.IsParticipantLocallyMuted(playerPuid);
+
+// Get all players you've locally muted
+List<string> mutedPlayers = voice.GetLocallyMutedParticipants();
+```
+
+On `EOSVoicePlayer`, you can also check the mute state directly:
+
+```csharp
+// Check mute state on the voice player component
+bool muted = voicePlayer.IsLocallyMuted;
 ```
 
 ### Speaking Detection
@@ -169,6 +191,13 @@ The `EOSVoicePlayer` component has several configurable settings:
 | **Min Distance** | `1.0` | Distance before volume starts attenuating |
 | **Max Distance** | `50.0` | Maximum audible distance |
 | **Rolloff Mode** | `Logarithmic` | How volume attenuates with distance |
+
+| Property | Type | Description |
+|---|---|---|
+| **IsSpeaking** | `bool` | Whether this participant is currently speaking |
+| **IsLocallyMuted** | `bool` | Whether you've muted this participant locally |
+| **IsReceivingAudio** | `bool` | Whether audio frames are queued for playback |
+| **QueuedFrames** | `int` | Number of buffered audio frames |
 
 ### Voice Effects
 

@@ -1,6 +1,6 @@
 # EOS SDK for Unity
 
-**v1.5.0** -- Lightweight Unity wrapper for the Epic Online Services (EOS) C# SDK v1.18.1.2.
+**v1.6.4** -- Lightweight Unity wrapper for the Epic Online Services (EOS) C# SDK v1.18.1.2.
 
 No PlayEveryWare dependency. No bloated plugin manager. Just the raw EOS SDK with thin convenience wrappers that get out of your way.
 
@@ -44,12 +44,12 @@ That's it. The SDK initializes, logs in with a DeviceID token, and all managers 
 
 Use the Setup Wizard (`Tools > EOS SDK > Setup Wizard`) to configure your own EOS Developer Portal credentials. Click **"Fill Sample Credentials"** for quick testing with public demo keys.
 
-## What's New in v1.5.0
+## What's New in v1.6.4
 
-- **Unity 2022 Android builds** -- automatic D8 workaround for AGP 7.4.2's broken dexer (pre-dexed classes bypass the crash)
-- **Multi-version support** -- tested on Unity 2022.3, 6000.0, 6000.1, 6000.3 (all produce working APKs)
-- **VoIP init instrumentation** -- `[TIMING]` logs and `OnVoiceInitProgress` event for UI progress indicators
-- **Pre-query audio devices** -- voice devices cached at login so voice connects faster
+- **Local mute state tracking** -- `IsParticipantLocallyMuted()`, `GetLocallyMutedParticipants()`, and `EOSVoicePlayer.IsLocallyMuted` so you can check if you've muted a specific player
+- **External auth login** -- `LoginWithExternalAuthAsync()` for all EOS credential types + `LoginWithOculusNonceAsync()` for Quest
+- **Lobby improvements** -- auto-leave before create, batch attribute setting, ghost lobby defense, faster host migration
+- **Android builds** -- automatic D8 workaround, tested on Unity 2022.3, 6000.0, 6000.1, 6000.3
 
 ## Requirements
 
