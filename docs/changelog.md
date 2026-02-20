@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.6.4
+
+- **Local mute state tracking** -- `SetParticipantMuted` now tracks which participants are locally muted. New APIs: `IsParticipantLocallyMuted(puid)` to check if you've muted a specific player, `GetLocallyMutedParticipants()` to get all muted PUIDs. Mute state is automatically cleaned up when a participant leaves or the lobby is destroyed.
+- **EOSVoicePlayer.IsLocallyMuted** -- new `bool` property on `EOSVoicePlayer` that reads the local mute state directly from the voice manager.
+
+## v1.6.3
+
+- **External auth login** -- `LoginWithExternalAuthAsync()` supports all 20+ EOS credential types for server-authoritative authentication. `LoginWithOculusNonceAsync()` convenience method for Meta Quest VR apps.
+- **Security docs** -- new `security.md` covering auth architecture, token handling, and platform-specific guidance.
+- **Auth docs** -- new `auth.md` covering authentication flows and credential types.
+
 ## v1.6.2
 
 - **Fix** -- Exclude full lobbies filter now works reliably. The search was client-side filtering with a server-side limit of 10 results, meaning full lobbies consumed result slots. Now over-fetches from EOS (3x or 50 minimum) when client-side filters are active, then caps to the requested `MaxResults`.
