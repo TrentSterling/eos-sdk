@@ -136,6 +136,12 @@ namespace EOSNative.Voice
         public bool IsSpeaking => EOSVoiceManager.Instance?.IsSpeaking(_participantPuid) ?? false;
 
         /// <summary>
+        /// Whether this participant is locally muted (you called SetParticipantMuted on them).
+        /// </summary>
+        public bool IsLocallyMuted => !string.IsNullOrEmpty(_participantPuid) &&
+            (EOSVoiceManager.Instance?.IsParticipantLocallyMuted(_participantPuid) ?? false);
+
+        /// <summary>
         /// Spatial blend (0 = 2D, 1 = 3D). Changes are applied immediately.
         /// </summary>
         public float SpatialBlend

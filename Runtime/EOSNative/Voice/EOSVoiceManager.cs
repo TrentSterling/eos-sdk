@@ -162,6 +162,9 @@ namespace EOSNative.Voice
         // Participant audio status (main thread only)
         private readonly Dictionary<string, RTCAudioStatus> _audioStatus = new();
 
+        // Locally muted participants (main thread only — tracks SetParticipantMuted state)
+        private readonly HashSet<string> _locallyMutedParticipants = new();
+
         // Unity Microphone capture for local mic level meter
         private AudioClip _micClip;
         private string _micDeviceName;
@@ -548,6 +551,10 @@ namespace EOSNative.Voice
             {
                 if (data.ResultCode == Result.Success)
                 {
+                    if (muted)
+                        _locallyMutedParticipants.Add(puid);
+                    else
+                        _locallyMutedParticipants.Remove(puid);
                     EOSDebugLogger.Log(DebugCategory.VoiceManager, "EOSVoiceManager", $" Participant {puid} {(muted ? "muted" : "unmuted")} locally");
                 }
                 else
@@ -850,6 +857,23 @@ namespace EOSNative.Voice
         /// </summary>
         public int ParticipantCount => _audioStatus.Count;
 
+        /// <summary>
+        /// Check if a participant is locally muted (you won't hear them).
+        /// This reflects the state set by <see cref="SetParticipantMuted"/>.
+        /// </summary>
+        public bool IsParticipantLocallyMuted(string puid)
+        {
+            return _locallyMutedParticipants.Contains(puid);
+        }
+
+        /// <summary>
+        /// Get all locally muted participant PUIDs.
+        /// </summary>
+        public List<string> GetLocallyMutedParticipants()
+        {
+            return new List<string>(_locallyMutedParticipants);
+        }
+
         #endregion
 
         #region RTC Notifications
@@ -1115,6 +1139,7 @@ namespace EOSNative.Voice
                     // Clear their state
                     _speakingState.Remove(puid);
                     _audioStatus.Remove(puid);
+                    _locallyMutedParticipants.Remove(puid);
                     if (_audioBuffers.TryRemove(puid, out var queue))
                     {
                         while (queue.TryDequeue(out _)) { }
@@ -1199,6 +1224,7 @@ namespace EOSNative.Voice
             _audioBuffers.Clear();
             _speakingState.Clear();
             _audioStatus.Clear();
+            _locallyMutedParticipants.Clear();
 
             IsConnected = false;
             IsMuted = false;
