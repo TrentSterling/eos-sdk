@@ -225,6 +225,11 @@ namespace EOSNative
 
         private static IntPtr GetProcAddressOSX(IntPtr handle, string procName)
         {
+            // Bindings.cs uses Apple mangling (underscore prefix) for symbol names,
+            // but dlsym() expects the C-level name without the underscore prefix.
+            if (procName.StartsWith("_"))
+                procName = procName.Substring(1);
+
             dlerror();
             IntPtr res = dlsym(handle, procName);
             IntPtr errPtr = dlerror();
